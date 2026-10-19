@@ -1,0 +1,49 @@
+ROP -10 dBm: FFE (LS) 3.2e-02 | Volterra 2.6e-03 | MLP 1.7e-03 | CNN 6.6e-04 | BiLSTM 8.7e-04
+ROP -9 dBm: FFE (LS) 3.0e-02 | Volterra 1.7e-03 | MLP 9.5e-04 | CNN 3.3e-04 | BiLSTM 4.8e-04
+ROP -8 dBm: FFE (LS) 2.9e-02 | Volterra 1.2e-03 | MLP 5.0e-04 | CNN 1.9e-04 | BiLSTM 3.0e-04
+ROP -7 dBm: FFE (LS) 2.8e-02 | Volterra 1.0e-03 | MLP 4.7e-04 | CNN 6.9e-05 | BiLSTM 1.9e-04
+ROP -6 dBm: FFE (LS) 2.8e-02 | Volterra 8.2e-04 | MLP 3.2e-04 | CNN 5.3e-05 | BiLSTM 1.2e-04
+ROP -5 dBm: FFE (LS) 2.7e-02 | Volterra 7.3e-04 | MLP 1.8e-04 | CNN 9.2e-05 | BiLSTM 1.4e-04
+ROP -4 dBm: FFE (LS) 2.7e-02 | Volterra 6.4e-04 | MLP 1.2e-04 | CNN 4.6e-05 | BiLSTM 9.2e-05
+ROP -3 dBm: FFE (LS) 2.7e-02 | Volterra 5.7e-04 | MLP 1.4e-04 | CNN 1.5e-05 | BiLSTM 7.6e-05
+ROP -2 dBm: FFE (LS) 2.7e-02 | Volterra 5.6e-04 | MLP 1.1e-04 | CNN 3.1e-05 | BiLSTM 7.6e-05
+
+每符号实数乘法次数: FFE (LS) 42, Volterra 197, MLP 13504, CNN 78720, BiLSTM 346432
+      [ldbp] iter    0  eff. SNR 19.40 dB
+      [ldbp] iter  100  eff. SNR 22.38 dB
+      [ldbp] iter  200  eff. SNR 22.60 dB
+      [ldbp] iter  300  eff. SNR 22.66 dB
+      [ldbp] iter    0  eff. SNR 5.44 dB
+      [ldbp] iter  100  eff. SNR 18.47 dB
+      [ldbp] iter  200  eff. SNR 22.29 dB
+      [ldbp] iter  300  eff. SNR 22.46 dB
+P +0 dBm: CDC 20.87 | DBP 1 st/span 21.49 | DBP 10 st/span 22.38 | LDBP 1 st/span 22.12 | LDBP 4 st/span 22.00 | CNN post-eq 20.81  (76 s)
+      [ldbp] iter    0  eff. SNR 19.58 dB
+      [ldbp] iter  100  eff. SNR 23.50 dB
+      [ldbp] iter  200  eff. SNR 23.85 dB
+      [ldbp] iter  300  eff. SNR 23.94 dB
+      [ldbp] iter    0  eff. SNR 5.45 dB
+      [ldbp] iter  100  eff. SNR 18.89 dB
+      [ldbp] iter  200  eff. SNR 23.95 dB
+      [ldbp] iter  300  eff. SNR 24.13 dB
+P +2 dBm: CDC 20.00 | DBP 1 st/span 21.38 | DBP 10 st/span 24.05 | LDBP 1 st/span 23.27 | LDBP 4 st/span 23.48 | CNN post-eq 19.95  (78 s)
+      [ldbp] iter    0  eff. SNR 18.75 dB
+      [ldbp] iter  100  eff. SNR 23.52 dB
+      [ldbp] iter  200  eff. SNR 23.90 dB
+      [ldbp] iter  300  eff. SNR 24.03 dB
+      [ldbp] iter    0  eff. SNR 5.42 dB
+      [ldbp] iter  100  eff. SNR 19.05 dB
+      [ldbp] iter  200  eff. SNR 25.30 dB
+      [ldbp] iter  300  eff. SNR 25.57 dB
+P +4 dBm: CDC 17.39 | DBP 1 st/span 19.46 | DBP 10 st/span 25.53 | LDBP 1 st/span 23.41 | LDBP 4 st/span 24.69 | CNN post-eq 17.36  (86 s)
+      [ldbp] iter    0  eff. SNR 16.69 dB
+      [ldbp] iter  100  eff. SNR 21.76 dB
+      [ldbp] iter  200  eff. SNR 22.11 dB
+      [ldbp] iter  300  eff. SNR 22.21 dB
+      [ldbp] iter    0  eff. SNR 5.34 dB
+      [ldbp] iter  100  eff. SNR 19.18 dB
+      [ldbp] iter  200  eff. SNR 26.11 dB
+      [ldbp] iter  300  eff. SNR 26.45 dB
+P +6 dBm: CDC 13.66 | DBP 1 st/span 16.09 | DBP 10 st/span 26.75 | LDBP 1 st/span 21.85 | LDBP 4 st/span 25.50 | CNN post-eq 14.13  (110 s)
+
+每符号实数乘法次数(近似): DBP 1 st/span 2320, DBP 10 st/span 23200, LDBP 1 st/span 6800, LDBP 4 st/span 10560, CNN post-eq 120704

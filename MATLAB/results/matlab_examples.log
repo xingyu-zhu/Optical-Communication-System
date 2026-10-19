@@ -1,0 +1,64 @@
+FO est -1.500 GHz | BER 5.04e-05 (X 6.72e-05, Y 3.36e-05) | SNR 19.02 dB | EVM 11.1% | GMI 3.999 b/sym
+OSNR 16 dB: BER 5.33e-02, SNR 10.43 dB
+OSNR 17 dB: BER 3.78e-02, SNR 11.28 dB
+OSNR 18 dB: BER 2.14e-02, SNR 12.68 dB
+OSNR 19 dB: BER 1.24e-02, SNR 13.71 dB
+OSNR 20 dB: BER 6.03e-03, SNR 14.73 dB
+OSNR 21 dB: BER 2.71e-03, SNR 15.71 dB
+OSNR 22 dB: BER 1.01e-03, SNR 16.70 dB
+OSNR 23 dB: BER 1.71e-04, SNR 17.67 dB
+OSNR 24 dB: BER 5.04e-05, SNR 18.65 dB
+ROP -14 dBm: BER 1.70e-02
+ROP -13 dBm: BER 7.34e-03
+ROP -12 dBm: BER 3.37e-03
+ROP -11 dBm: BER 1.64e-03
+ROP -10 dBm: BER 1.01e-03
+ROP -9 dBm: BER 9.07e-04
+ROP -8 dBm: BER 8.20e-04
+ROP -7 dBm: BER 6.45e-04
+ROP -6 dBm: BER 6.80e-04
+ROP -5 dBm: BER 6.63e-04
+ROP -4 dBm: BER 5.58e-04
+Vibration located at 1210.8 m (true 1200-1210 m), waveform corr 1.000
+P -2 dBm: SNR CDC 19.48 dB, DBP 19.81 dB
+P +0 dBm: SNR CDC 20.64 dB, DBP 21.73 dB
+P +2 dBm: SNR CDC 20.47 dB, DBP 23.57 dB
+P +4 dBm: SNR CDC 18.37 dB, DBP 25.27 dB
+P +6 dBm: SNR CDC 14.90 dB, DBP 26.80 dB
+GN model: P_opt 0.68 dBm, SNR_opt 20.93 dB
+fiber  band  Nch      D alpha gamma   NF P_opt(dBm) SNR_opt(dB)
+SSMF   O     349  -0.18  0.33  1.84  6.5      -4.29        4.19
+SSMF   E     301   7.94  0.30  1.59  6.0      -0.42       11.30
+SSMF   S     187  13.69  0.23  1.42  6.0      -1.51       16.11
+SSMF   C      87  16.97  0.20  1.32  5.0      -2.15       19.07
+SSMF   L     141  19.19  0.21  1.25  5.5      -1.43       18.58
+SSMF   U     110  22.28  0.25  1.16  6.5       0.74       16.67
+ULL    O     349   1.06  0.29  1.00  6.5      -1.81        9.89
+ULL    E     301  10.46  0.26  0.86  6.0       0.41       15.34
+ULL    S     187  17.13  0.19  0.77  6.0      -0.80       20.09
+ULL    C      87  20.95  0.16  0.71  5.0      -1.50       23.05
+ULL    L     141  23.53  0.17  0.68  5.5      -0.77       22.55
+ULL    U     110  27.13  0.21  0.63  6.5       1.43       20.61
+NZDSF  O     349  -9.85  0.34  2.05  6.5       0.44        8.13
+NZDSF  E     301  -2.50  0.31  1.77  6.0      -1.83        9.08
+NZDSF  S     187   2.58  0.24  1.57  6.0      -3.54       13.26
+NZDSF  C      87   5.44  0.21  1.46  5.0      -3.51       16.89
+NZDSF  L     141   7.35  0.22  1.39  5.5      -2.60       16.60
+NZDSF  U     110   9.99  0.26  1.29  6.5      -0.24       14.88
+ASE only (\gamma=0) ...
+    (link 5 s)
+    center channel: SNR 23.01 dB, BER 0.00e+00, GMI 4.000
+1 ch: SPM ...
+    (link 8 s)
+    center channel: SNR 20.68 dB, BER 0.00e+00, GMI 4.000
+7 ch: SPM+XPM+FWM ...
+    (link 47 s)
+    center channel: SNR 19.43 dB, BER 4.03e-05, GMI 3.999
+7 ch: +SRS+steepening ...
+    (link 176 s)
+    center channel: SNR 19.43 dB, BER 4.03e-05, GMI 3.999
+
+GN model (center channel, ideal transceiver):
+    1 ch: SNR 21.09 dB (ASE 23.98, NLI 24.23); P_opt 0.08 dBm -> SNR_opt 21.30 dB
+    7 ch: SNR 18.67 dB (ASE 23.98, NLI 20.18); P_opt -1.27 dBm -> SNR_opt 19.95 dB
+    full C band (88 ch): SNR 16.65 dB; P_opt -2.15 dBm -> SNR_opt 19.07 dB

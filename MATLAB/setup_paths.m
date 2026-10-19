@@ -1,0 +1,6 @@
+%SETUP_PATHS 把各模块目录加入搜索路径（各主脚本开头调用）。
+root = fileparts(mfilename('fullpath'));
+addpath(fullfile(root, 'Utils'), fullfile(root, 'Tx'), fullfile(root, 'Components'), ...
+        fullfile(root, 'Channel'), fullfile(root, 'DSP'), fullfile(root, 'Metrics'), fullfile(root, 'System'), ...
+        fullfile(root, 'NN'));
+if ~exist(fullfile(root, 'results'), 'dir'), mkdir(fullfile(root, 'results')); end
