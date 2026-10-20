@@ -42,6 +42,13 @@ def cd(E, fs, L, D=17.0, lam=1550.0, S=0.0):
     return fft_filter(E, np.exp(-1j * _disp_phase(2 * np.pi * freq(E.shape[-1], fs), D, S, lam) * L * 1e3))
 
 
+def power_fading(f, L, D=17.0, lam=1550.0, alpha=0.0):
+    """IM-DD 色散功率衰落的小信号频率响应 |H(f)| = |cos(θ) - α·sin(θ)|，θ = π·λ²·D·L·f²/c（Henry 因子 α 的啁啾）。
+    α=0 时第 k 个陷波位于 f_k = sqrt((2k-1)·c / (2·λ²·D·L))。f [Hz]，L [km]，D [ps/(nm km)]，lam [nm]。"""
+    th = np.pi * (lam * 1e-9) ** 2 * D * 1e-6 * L * 1e3 * np.asarray(f) ** 2 / C
+    return np.abs(np.cos(th) - alpha * np.sin(th))
+
+
 def raman_response(w, tau1=12.2e-15, tau2=32e-15):
     """石英 Raman 响应的频域形式 H_R(ω)（h_R(t) 的 FFT，H_R(0)=1）。w 为角频率 [rad/s]。"""
     return (tau1 ** 2 + tau2 ** 2) / (tau1 * tau2 ** 2) / tau1 / ((1 / tau2 + 1j * w) ** 2 + 1 / tau1 ** 2)

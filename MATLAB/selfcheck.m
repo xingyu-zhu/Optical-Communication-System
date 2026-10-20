@@ -98,6 +98,57 @@ rep('FWM (DSF vs SSMF)', fwm(1) > fwm(2) + 15, sprintf('product/pump: DSF %.1f d
 en = gn_eta(fib, 32e9, 5, 32e9, 'numeric'); ec = gn_eta(fib, 32e9, 5, 32e9, 'closed');
 rep('GN numeric vs closed', abs(10*log10(en/ec)) < 1, sprintf('eta %.1f vs %.1f 1/W^2 per span (%+.2f dB)', en, ec, 10*log10(en/ec)));
 
+fprintf('---- More algorithms ----\n');
+% 13) OFDM：Schmidl-Cox 定时/频偏 + 3 径信道 + LS 信道估计 + 导频 CPE
+nfft = 256; ncp = 16; Lsc = 64; hc = [1, 0.3+0.2j, 0.1];
+Xo = c(randi(M, 40, nfft)); Xo(:, 1) = 0;
+half = exp(2j*pi*rand(1, Lsc));
+sig = [zeros(1, 100), half, half, ofdm_mod(Xo, ncp), zeros(1, 10)];
+yo = addawgn(filter(hc, 1, sig) .* exp(2j*pi*1e-3*(0:numel(sig)-1)), 25);
+[d, fo] = schmidl_cox(yo, Lsc);
+st = d + 2*Lsc - ncp/2;                             % 定时回退半个 CP，避免晚采引入符号间干扰
+yc = fo_comp(yo, fo, 1);
+Yo = ofdm_demod(yc(st:end), nfft, ncp); Yo = Yo(1:size(Xo,1), :);
+Zo = ofdm_eq(Yo, Xo, 2, 2:16:nfft);
+so = calc_snr(Zo(3:end, 2:end), Xo(3:end, 2:end));
+Hf = abs(fft(hc, nfft)).^2; Hf = Hf(2:end);           % 理论：频率选择性信道 + 2 个训练符号的 LS 估计噪声
+sth = -10*log10(mean((1 + mean(1./abs(c).^2)/2) * 10^-2.5 * mean(abs(sig).^2) * sum(abs(hc).^2) ./ Hf));
+rep('OFDM + Schmidl-Cox', abs(fo - 1e-3) < 1e-4 && so > sth - 1, sprintf('d %d (true 101), CFO %.2e (true 1e-3), SNR %.1f dB (theory %.1f)', d, fo, so, sth));
+
+% 14) 差分 QAM：中途 π/2 周跳不扩散
+bd = uint8(randi([0 1], 2, 4*8000));
+rd = addawgn(diff_qam(bd, 16), 16); rd(:, 4001:end) = rd(:, 4001:end)*1j;
+bdd = calc_ber(bd, diff_qam_demod(rd, 16));
+rep('Differential 16QAM + slip', bdd < 3*ber_theory(16, 16), sprintf('BER %.2e (Gray, no slip %.2e)', bdd, ber_theory(16, 16)));
+
+% 15) IM-DD：FFE / DFE / MLSE（PAM4，强 ISI 信道 [1, 0.9, 0.5]）
+lv = pam_const(4); a = lv(randi(4, 1, 40000));
+xr = filter([1 0.9 0.5], 1, a) + 0.25*randn(size(a));
+dec = @(v) lv(sym_decide(v, lv) + 1);
+yf =ffe_lms(xr, a, 21, 2e-4, 1, 8000, lv); yd = dfe_lms(xr, a, 21, 3, 2e-4, 1, 8000, lv);
+am = mlse_viterbi(xr, ch_est(xr(1:8000), a(1:8000), 3), lv);
+k0 = 10001:numel(a);
+ser_f = mean(dec(yf(k0)) ~= a(k0)); ser_d = mean(dec(yd(k0)) ~= a(k0)); ser_m = mean(am(k0) ~= a(k0));
+rep('PAM4 FFE / DFE / MLSE', ser_m < ser_d && ser_d < ser_f, sprintf('SER %.2e / %.2e / %.2e', ser_f, ser_d, ser_m));
+
+% 16) PB-NLC：合成的一阶 SPM/IXPM 型失真 y = s·exp(jε(|s_k|² + 0.5|s_k±1|²)) + 噪声
+pw = sum(abs(s).^2, 1);
+yn = addawgn(s .* exp(0.25j*(pw + 0.5*circshift(pw, 1, 2) + 0.5*circshift(pw, -1, 2))), 24);
+yp = pb_nlc(yn, s, 8000, 3);
+s0_ = calc_snr(yn(:, 8001:end), s(:, 8001:end)); s1_ = calc_snr(yp(:, 8001:end), s(:, 8001:end));
+rep('PB-NLC (synthetic)', s1_ > s0_ + 2, sprintf('SNR %.1f -> %.1f dB', s0_, s1_));
+
+% 17) LDPC (3,6) n=1944 + QPSK @ 3 dB：软判决译码
+code = ldpc_make(1944, 3, 6);
+u = uint8(randi([0 1], 20, code.k));
+cw = ldpc_encode(u, code);
+q4 = qam_const(4);
+sq = bits2sym(reshape(cw.', 1, []), q4);
+rq = addawgn(sq, 3);
+[bh, ok] = ldpc_decode(reshape(calc_llr(rq, q4, 10^-0.3), 1944, []).', code);
+pre = mean(sym2bits(rq, q4) ~= reshape(cw.', 1, [])); post = mean(bh(:, code.free) ~= u, 'all');
+rep('LDPC NMS decoding', post < 1e-4 && pre > 1e-4, sprintf('pre-FEC %.2e -> post-FEC %.1e, NGMI %.3f, rate %.3f', pre, post, calc_ngmi(rq, sq, q4), code.k/1944));
+
 function rep(name, ok, info)
 tag = {'BAD', 'OK '};
 fprintf('[%s] %-26s %s\n', tag{ok+1}, name, info);

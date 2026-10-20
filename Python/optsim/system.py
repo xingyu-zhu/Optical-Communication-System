@@ -1,4 +1,5 @@
-"""系统级封装：统一参数 Config、单信道发射 tx_signal、WDM 收发 wdm_tx / wdm_rx、接收 DSP 链 rx_dsp。
+"""系统级封装：统一参数 Config、单信道发射 tx_signal、WDM 收发 wdm_tx / wdm_rx、接收 DSP 链 rx_dsp；
+IM-DD：ImddConfig、imdd_tx、imdd_link、imdd_rx。
 
 最小用法
 --------
@@ -17,7 +18,8 @@ from .utils import normalize, resample, set_power
 @dataclass
 class Config:
     # ---- 信号 ----
-    M: int = 16                 # QAM 阶数
+    M: int = 16                 # 调制阶数
+    mod: str = 'qam'            # 'qam' | 'psk'（相干 M-PSK：BPSK/QPSK/8PSK/16PSK）
     rs: float = 40e9            # 符号率 [Bd]
     beta: float = 0.1           # RRC 滚降
     sps: int = 4                # 仿真过采样（fs = sps·rs；WDM 需覆盖全部信道，如 16）
@@ -60,13 +62,13 @@ class Config:
 
 
 def tx_signal(cfg):
-    """发射端 DSP：比特 -> Gray QAM -> 成帧 [训练|导频+数据] -> RRC 成形。
+    """发射端 DSP：比特 -> Gray QAM / PSK（cfg.mod）-> 成帧 [训练|导频+数据] -> RRC 成形。
 
     返回 dict: const 星座, bits (2, nbits) 数据比特, frame (2, Nf) 帧符号, kind (Nf,) 符号类型
                (0 数据/1 训练/2 导频), wave (2, Nf·sps) 每偏振单位功率波形
     """
     rng = np.random.default_rng(cfg.seed)
-    c = tx.qam(cfg.M)
+    c = tx.constellation(cfg.mod, cfg.M)
     k = int(np.log2(cfg.M))
     nd = cfg.n_blocks * (cfg.pilot_period - 1)
     bits = tx.rand_bits((2, nd * k), rng)
@@ -111,6 +113,7 @@ def rx_dsp(r, cfg, ref):
               y (2, Nf) 与 ref['frame'] 逐符号对齐的整帧符号（含训练/导频，供 NN 后均衡使用）
     """
     c, f, kind = ref['const'], ref['frame'], ref['kind']
+    rot = tx.rot_order(c)                                    # 旋转对称阶数：QAM/QPSK 4，BPSK 2，8PSK 8
     fib, out = cfg.fib, {}
     fs2 = 2 * cfg.rs
     # 1) 前端：去直流 + GSOP 正交化 + 重采样到 2 sps
@@ -134,16 +137,16 @@ def rx_dsp(r, cfg, ref):
     y, w, out['eq_err'] = dsp.mimo_eq(y, cfg.ntaps, cfg.mu_rde, 2, 'rde', c, w=w)
     y = normalize(y)
     # 5) 频偏估计与补偿（1 sps）
-    out['fo'] = dsp.foe(y, cfg.rs)
+    out['fo'] = dsp.foe(y, cfg.rs, m=rot)
     y = dsp.fo_comp(y, out['fo'], cfg.rs)
     # 6) 载波相位恢复 + 同步 + 模糊/周跳消除
-    yb, _ = dsp.bps(y, c) if cfg.cpr != 'vv' else dsp.vv(y, 64, 4, c)
+    yb, _ = dsp.bps(y, c, rot=rot) if cfg.cpr != 'vv' else dsp.vv(y, 64, rot, c)
     yb, out['lag'], perm = dsp.sync(yb, f)
     if cfg.cpr == 'pilot':
         ya = np.roll(y[perm], -out['lag'], axis=-1)[:, :f.shape[1]]
         y, _ = dsp.pilot_cpr(ya, f, kind == 2, 5)
     else:
-        y = dsp.fix_ambiguity(yb, f, kind > 0, n=5)        # 训练+导频辅助的周跳消除
+        y = dsp.fix_ambiguity(yb, f, kind > 0, n=5, rot=rot)   # 训练+导频辅助的周跳消除
     # 7) 可选 DD-LMS 精均衡
     if cfg.dd_lms:
         y, _, _ = dsp.mimo_eq(y, 7, 1e-4, 1, 'dd', c)
@@ -155,3 +158,106 @@ def rx_dsp(r, cfg, ref):
                evm=metrics.evm(d, s), gmi=metrics.gmi(d, s, c),
                ber_xy=[metrics.ber(ref['bits'][p], rb[p])[0] for p in range(2)])
     return out
+
+
+
+# ============================== IM-DD（PAM-M 直接检测） ==============================
+@dataclass
+class ImddConfig:
+    """IM-DD PAM-M 短距系统参数（单跨、无光放大，默认 O 波段 2 km）。"""
+    # ---- 信号 ----
+    M: int = 4                  # PAM 阶数（2 即 NRZ-OOK）
+    rs: float = 56e9            # 符号率 [Bd]
+    sps: int = 4                # 仿真过采样
+    n_sym: int = 2 ** 15        # 符号数
+    n_train: int = 4096         # 均衡器训练符号数（BER 只统计其后的符号）
+    beta: float = 0.2           # RC 成形滚降
+    seed: int = 1
+    # ---- 发射 ----
+    tx: str = 'mzm'             # 'mzm'（零啁啾，正交偏置）| 'eml'（EAM，啁啾 α）| 'dml'（直调，瞬态+绝热啁啾）
+    p_tx: float = 5.0           # 出纤光功率 [dBm]（MZM/EML 为激光功率；DML 为平均功率）
+    swing: float = 0.4          # MZM 驱动摆幅 [Vπ]
+    er_db: float = 8.0          # EML / DML 消光比 [dB]
+    alpha: float = 0.0          # EML / DML 啁啾 Henry 因子
+    k_ad: float = 1e12          # DML 绝热啁啾 [Hz/W]
+    linewidth: float = 1e6      # 激光线宽 [Hz]
+    rin_db: float = -150.0      # 激光 RIN [dB/Hz]
+    dac_enob: float = 6
+    dac_bw: float = 0.6         # DAC/驱动带宽（× rs）
+    # ---- 链路 ----
+    band: str = 'O'
+    fiber: str = 'SSMF'
+    L: float = 2.0              # 光纤长度 [km]
+    # ---- 接收 ----
+    rx: str = 'pin'             # 'pin' | 'apd'
+    R: float = 0.8              # 响应度 [A/W]
+    apd_M: float = 10.0         # APD 倍增因子
+    rx_bw: float = 0.7          # PD/TIA 带宽（× rs）
+    irnd: float = 15e-12        # TIA 输入等效噪声电流密度 [A/√Hz]
+    adc_enob: float = 6
+    eq: str = 'ffe'             # 'ffe'(LMS) | 'dfe' | 'volterra' | 'mlse'（FFE + 噪声白化后滤波 + MLSE）
+    ntaps: int = 21             # FFE 抽头（2 sps 采样点）
+    mu: float = 1e-3            # LMS 步长
+    nb: int = 3                 # DFE 反馈抽头
+
+    @property
+    def fs(self):
+        """仿真采样率 [Hz]。"""
+        return self.rs * self.sps
+
+    @property
+    def fib(self):
+        """当前波段/光纤参数（params.fiber_params）。"""
+        return fiber_params(self.band, self.fiber, L=self.L)
+
+
+def imdd_tx(cfg):
+    """IM-DD 发射：比特 -> Gray PAM-M（电平归一化到 [-1, 1]）-> RC 成形 -> DAC -> MZM / EML / DML。
+
+    返回 dict: levels 判决电平, bits, sym (n_sym,), E (N,) 出纤光场
+    """
+    rng = np.random.default_rng(cfg.seed)
+    k = int(np.log2(cfg.M))
+    lv = tx.pam(cfg.M) / (cfg.M - 1)
+    bits = tx.rand_bits(cfg.n_sym * k, rng)
+    sym = lv[tx.bits2int(bits, k)]
+    u = dev.dac(tx.pulse_shape(sym, cfg.sps, cfg.beta, 'rc').real, cfg.fs, cfg.dac_enob, cfg.dac_bw * cfg.rs)
+    u = u / np.max(np.abs(u))                                   # 归一化驱动到 [-1, 1]
+    if cfg.tx == 'dml':
+        E = dev.dml(u, cfg.fs, cfg.p_tx, cfg.er_db, cfg.alpha, cfg.k_ad, None, cfg.linewidth, cfg.rin_db, rng)
+    else:
+        cw = dev.laser(len(u), cfg.fs, cfg.p_tx, cfg.linewidth, rin_db=cfg.rin_db, rng=rng)
+        E = dev.mzm(cw, cfg.swing * u, 1.0, -0.5) if cfg.tx == 'mzm' else dev.eml(cw, u, cfg.er_db, cfg.alpha)
+    return dict(levels=lv, bits=bits, sym=sym, E=E)
+
+
+def imdd_link(E, cfg):
+    """短距光纤：色散（含斜率，参数随波段）+ 损耗。功率低、距离短，忽略光纤非线性。"""
+    from .channel import cd
+    fib = cfg.fib
+    return cd(E, cfg.fs, cfg.L, fib['D'], fib['lam'], fib['S']) * 10 ** (-fib['alpha'] * cfg.L / 20)
+
+
+def imdd_rx(E, cfg, ref, rop_dbm, rng=None):
+    """IM-DD 接收：VOA 调到 ROP -> PIN 或 APD（+TIA 噪声）-> ADC 2 sps -> 均衡（cfg.eq）-> PAM 判决。
+
+    返回 dict: ber, snr（均衡后电 SNR [dB]）, y（均衡输出 1 sps）, n_bits（统计比特数）
+    """
+    rng = np.random.default_rng(rng)
+    E = dev.voa(E, 10 * np.log10(np.mean(np.abs(E) ** 2) / 1e-3) - rop_dbm)
+    kw = dict(bw=cfg.rx_bw * cfg.rs, irnd=cfg.irnd, rng=rng)
+    i = dev.apd(E, cfg.fs, cfg.apd_M, cfg.R, **kw) if cfg.rx == 'apd' else dev.photodiode(E, cfg.fs, cfg.R, **kw)
+    y = dev.adc(i, cfg.fs, 2 * cfg.rs, cfg.adc_enob)
+    lv, sym, nt = ref['levels'], ref['sym'], cfg.n_train
+    y = (y - y.mean()) / y.std() * lv.std()
+    if cfg.eq == 'dfe':
+        ye, _ = dsp.dfe(y, sym, cfg.ntaps, cfg.nb, cfg.mu, 2, nt, lv)
+    elif cfg.eq == 'volterra':
+        ye, _ = dsp.volterra(y, sym, nt, (cfg.ntaps, 9, 5), 2)
+    else:
+        ye, _ = dsp.ffe(y, sym, cfg.ntaps, cfg.mu, 2, nt, lv)
+    a = dsp.pf_mlse(ye, sym, nt, lv) if cfg.eq == 'mlse' else lv[tx.decide(ye, lv)]
+    k = int(np.log2(cfg.M))
+    rb = tx.int2bits(tx.decide(a[nt:], lv), k)
+    return dict(ber=metrics.ber(ref['bits'][nt * k:], rb)[0], snr=metrics.snr(ye[nt:], sym[nt:]), y=ye,
+                n_bits=len(rb))

@@ -5,7 +5,8 @@ function cfg = sys_config(varargin)
 %         cfg = sys_config('fib_kw', {'pmd', 0, 'raman', true});   覆盖光纤参数
 %   生成后也可直接改 cfg.fib.xxx。
 % ---- 信号 ----
-cfg.M = 16;               % QAM 阶数
+cfg.M = 16;               % 调制阶数
+cfg.mod = 'qam';          % 'qam' | 'psk'（相干 M-PSK：BPSK/QPSK/8PSK/16PSK）
 cfg.rs = 40e9;            % 符号率 [Bd]
 cfg.beta = 0.1;           % RRC 滚降
 cfg.sps = 4;              % 仿真过采样（fs = sps·rs；WDM 需覆盖全部信道，如 16）

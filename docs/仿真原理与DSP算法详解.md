@@ -617,6 +617,54 @@ $$\hat k=\mathrm{round}\Big(\frac{\angle\sum (y\cdot\text{ref}^*)}{\pi/2}\Big),\
   $$E_{\text{rec}}=\sqrt{I}\cdot\exp\big(j\cdot\mathcal H\{\ln\sqrt I\}\big)$$
   是低成本直接检测系统中少有的能够恢复相位信息、从而补偿色散的方案（Mecozzi et al. 2016）。
 
+### 9.1 IM-DD 发射机啁啾与色散功率衰落
+
+小信号下，带啁啾的强度调制信号经色散后，检测到的功率响应为
+
+$$|H(f)| = \big|\cos\theta - \alpha\sin\theta\big|,\qquad \theta=\frac{\pi\lambda^2 D L f^2}{c}$$
+
+其中 $\alpha$ 为 Henry 因子（瞬态啁啾）。
+
+- **MZM**（推挽、正交偏置）：$\alpha=0$，第 $k$ 个陷波位于 $f_k=\sqrt{(2k-1)c/(2\lambda^2DL)}$。C 波段 10 km 时 $f_1\approx19$ GHz。
+- **EML**（`devices.eml`）：电吸收调制器的吸收随电压近似指数变化，取 $T(u)=10^{-\mathrm{ER}(1-u)/20}$，出射场 $E\,T^{(1+j\alpha)/2}$，即 $\Delta\phi=(\alpha/2)\ln T$。$\alpha>0$ 使陷波向低频移动、衰落加剧；$\alpha<0$ 则相反。指数传输还使 PAM 电平间距不均，需要非线性均衡（如 Volterra）。
+- **DML**（`devices.dml`，Koch–Bowers 大信号模型）：$P=\bar P(1+m u)$，$m=(\mathrm{ER}-1)/(\mathrm{ER}+1)$，频率啁啾 $\Delta\nu=\frac{\alpha}{4\pi}\big(\frac{d\ln P}{dt}+\kappa P\big)$。其中瞬态项与 EML 相同；绝热项 $\kappa P$ 使"1"、"0"电平对应不同频率，经色散后转换为额外的码间串扰。
+
+### 9.2 接收机噪声：PIN、TIA 与 APD
+
+- **PIN + TIA**（`photodiode(irnd=...)`）：电流噪声方差为 $\sigma^2 = 2q\bar I B + i_n^2 B$，其中 $i_n$ 为 TIA 输入等效噪声电流密度（典型 10–20 pA/√Hz）。低 ROP 时 TIA 噪声占主导。
+- **APD**（`devices.apd`）：信号放大为 $M$ 倍，散粒噪声变为 $2qM^2F(M)(R\bar P+i_d)B$，过剩噪声因子 $F=k_AM+(1-k_A)(2-1/M)$（McIntyre）。$M$ 增大可压过 TIA 噪声，但倍增噪声随 $M^2F$ 增长，因此存在最优 $M$。在本项目设置下（$M=10$，$k_A=0.5$），PAM4 灵敏度改善约 3 dB。
+
+### 9.3 IM-DD 均衡器
+
+| 均衡器 | 原理 | 适用场景 |
+|---|---|---|
+| FFE（`dsp.ffe`，LMS） | 线性 FIR | 带宽受限、无谱零点 |
+| FFE+DFE（`dsp.dfe`） | 反馈支路用已判决符号消除后续 ISI，不放大噪声 | 后续 ISI 较强（误码传播是其代价） |
+| Volterra（`dsp.volterra`） | 2/3 阶核，岭回归一次求解 | 调制器/平方律非线性（MZM 余弦、EML 指数、色散×平方律） |
+| FFE + 后滤波 + MLSE（`dsp.pf_mlse`） | FFE 后噪声有色：用 AR($p$) 白化滤波 $1+\sum p_iD^i$，再以已知 ISI $h=[1,p]$ 做 Viterbi 序列检测 | 强带宽限制（噪声增强严重）时，MLSE 能回收白化带来的增益 |
+
+谱零点（功率衰落陷波落入信号带宽）无法被任何线性均衡恢复，这决定了 C 波段 IM-DD 的色散受限距离。
+
+### 9.4 相干 M-PSK 与差分检测 DPSK
+
+**相干 M-PSK** 与 QAM 共用 DSP 链，差别只在星座的旋转对称阶数 $r$（`tx.rot_order`）：BPSK 为 2，QPSK/QAM 为 4，8PSK 为 8。FOE 使用 $r$ 次方谱峰，BPS 在 $[-\pi/r,\pi/r)$ 内搜索，模糊步长为 $2\pi/r$。理论 BER 如下：
+
+- BPSK：$Q(\sqrt{2\gamma_s})$；
+- QPSK：$Q(\sqrt{\gamma_s})$；
+- $M\ge8$：$\frac{2}{k}Q\big(\sqrt{2\gamma_s}\sin\frac{\pi}{M}\big)$。
+
+**差分 M-DPSK**（`tx.diff_psk`）把信息编码在相邻符号的相位差 $\Delta\phi=2\pi i/M$ 上。接收端用两个 1 符号延迟干涉仪（DLI，相位偏置 0 与 $\pi/2$）加平衡探测（`devices.dli_rx`），直接得到差分积：
+
+$$z_k \propto y_k\,y_{k-1}^*$$
+
+这种接收机无需本振和载波恢复，对激光相位噪声的要求只是 $\Delta\nu T\ll1$。代价是有效噪声加倍，理论 BER 为：
+
+- DBPSK：$\tfrac12 e^{-\gamma_s}$；
+- DQPSK：Proakis 式 $Q_1(a,b)-\tfrac12 I_0(ab)e^{-(a^2+b^2)/2}$，其中 $a^2=\gamma_s(1-1/\sqrt2)$，$b^2=\gamma_s(1+1/\sqrt2)$；
+- 在 BER = 3.8×10⁻³ 处，DBPSK、DQPSK、D8PSK 相对相干检测的代价分别约为 1.4、2.4、2.9 dB。
+
+偏振不敏感的 DLI 还会收到正交偏振的 ASE-ASE 拍频；在低 OSNR（DBPSK 工作点约 7 dB）时，这会带来约 0.9 dB 的额外代价。
+
 ---
 
 ## 10. 性能指标
@@ -665,6 +713,11 @@ $$\hat k=\mathrm{round}\Big(\frac{\angle\sum (y\cdot\text{ref}^*)}{\pi/2}\Big),\
 - R. T. Jones, T. A. Eriksson, M. P. Yankov, D. Zibar, "Deep learning of geometric constellation shaping including fiber nonlinearities," *ECOC*, 2018.
 - C. Häger, H. D. Pfister, "Deep learning of the nonlinear Schrödinger equation fiber-optic communications," *ISIT*, 2018（学习型 DBP）。
 - ITU-T Recommendations G.652 / G.653 / G.654 / G.655（光纤标准）；G.694.1（WDM 频率栅格）。
+- T. L. Koch, J. E. Bowers, "Nature of wavelength chirping in directly modulated semiconductor lasers," *Electron. Lett.*, 20(25), 1984（DML 瞬态 + 绝热啁啾）。
+- R. J. McIntyre, "Multiplication noise in uniform avalanche diodes," *IEEE Trans. Electron Devices*, 13(1), 1966（APD 过剩噪声因子）。
+- J. G. Proakis, M. Salehi, *Digital Communications*, 5th ed., McGraw-Hill, 2008（M-PSK / DPSK 误码率）。
+- A. H. Gnauck, P. J. Winzer, "Optical phase-shift-keyed transmission," *J. Lightwave Technol.*, 23(1), 2005（DPSK/DQPSK 与 DLI 接收）。
+- IEEE Std 802.3bs-2017（200G/400G 以太网，KP4 RS(544,514) FEC，BER 门限 2.4×10⁻⁴）。
 - 开源参考实现：OptiCommPy（Python）、Robochameleon（MATLAB）。
 
 ---

@@ -4,6 +4,7 @@
     前端校正 (deskew, gsop) -> CDC / DBP -> 匹配滤波 -> 定时恢复 (timing_ff / gardner)
     -> 2x2 MIMO (mimo_eq) -> 频偏估计 (foe) -> 载波相位恢复 (bps / vv / pilot_cpr / pll)
     -> 帧同步 (sync) -> 模糊/周跳消除 (fix_ambiguity) -> 判决
+另有：微扰非线性补偿 pb_nlc；IM-DD 的 ffe / dfe / volterra / mlse；OFDM 的 ofdm_demod / ofdm_eq / schmidl_cox；KK 接收。
 输入输出均为 (P, N) 复数组（P 个偏振，沿最后一维为时间）。
 """
 import numpy as np
@@ -72,6 +73,24 @@ def dbp(x, fs, p_launch_dbm, n_spans, fib, steps=10, xi=1.0):
         E = E * 10 ** (-fib['alpha'] * fib['L'] / 20)
         E = ssfm(E, fs, b, nsteps=steps)
     return E / np.sqrt(total_power(E)) * s
+
+
+def pb_nlc(y, ref, n_train, L=10, lam=1e-3):
+    """一阶微扰非线性补偿（PB-NLC），微扰系数由训练符号最小二乘拟合：
+    Δy_p[k] = Σ_{m,n} C_mn·(y_p[k+m]·y_p*[k+m+n] + y_q[k+m]·y_q*[k+m+n])·y_p[k+n]，
+    取 |m|,|n| ≤ L 且 |m·n| ≤ L 的三元组（双曲剪枝），两偏振共享 C；输出 y − Δy。
+    参数: y、ref (P, N) CDC + CPR 后、已同步的 1 sps 符号; n_train 训练符号数; lam 岭回归系数
+    返回: (补偿后符号, C)
+    """
+    y = np.atleast_2d(y)
+    mn = [(m, n) for m in range(-L, L + 1) for n in range(-L, L + 1) if abs(m * n) <= L]
+    sh = lambda v, d: np.roll(v, -d, axis=-1)                # sh(v, d)[k] = v[k+d]
+    P = lambda m, n: np.sum(sh(y, m) * np.conj(sh(y, m + n)), 0)
+    T = np.stack([P(m, n) * sh(y, n) for m, n in mn], -1)    # (P, N, F)
+    A = T[:, :n_train].reshape(-1, len(mn))
+    c = np.linalg.solve(A.conj().T @ A + lam * len(A) * np.eye(len(mn)),
+                        A.conj().T @ (y[:, :n_train] - ref[:, :n_train]).ravel())
+    return y - T @ c, c
 
 
 # =============== 定时恢复 ===============
@@ -226,6 +245,69 @@ def ffe_ls(x, ref, n_train, ntaps=31, sps=2):
     return volterra(x, ref, n_train, (ntaps, 0, 0), sps)
 
 
+def dfe(x, ref, nf=21, nb=3, mu=1e-3, sps=1, n_train=None, levels=None):
+    """实数 LMS 判决反馈均衡（IM-DD / PAM）：y_k = w_f·x_k − w_b·[d_{k-1}, ..., d_{k-nb}]，
+    训练段 d 取 ref，之后取判决（levels 为判决电平）。FFE 抑制前导 ISI，DFE 无噪声增强地消除后续 ISI。
+    返回: (均衡输出 1 sps, (w_f, w_b))
+    """
+    N, h = len(x) // sps, nf // 2
+    xp = np.r_[x[-h:], x, x[:h]]
+    wf, wb, d = np.zeros(nf), np.zeros(nb), np.zeros(nb)
+    wf[h] = 1
+    n_train = N if n_train is None else n_train
+    y = np.zeros(N)
+    for k in range(N):
+        X = xp[k * sps:k * sps + nf]
+        y[k] = wf @ X - wb @ d
+        dk = ref[k] if k < n_train else levels[np.argmin(np.abs(levels - y[k]))]
+        e = dk - y[k]
+        wf += mu * e * X
+        wb -= mu * e * d
+        d = np.r_[dk, d[:-1]]
+    return y, (wf, wb)
+
+
+def ch_est(x, ref, ntaps):
+    """最小二乘估计因果 FIR 信道 x_k ≈ Σ_{i<ntaps} h_i·ref_{k-i}（1 sps，循环）。用于 MLSE 的信道模型。"""
+    A = np.stack([np.roll(ref, i) for i in range(ntaps)], 1)
+    return np.linalg.lstsq(A, x[:len(ref)], rcond=None)[0]
+
+
+def mlse(x, h, levels):
+    """MLSE（Viterbi）序列检测：x_k = Σ_{i=0}^{L} h_i·a_{k-i} + 噪声，a ∈ levels，状态为最近 L 个符号（M^L 个）。
+    通常接在短 FFE 之后，此时剩余 ISI 只有 2~3 个抽头（h 由 ch_est 得到）。返回判决电平序列。"""
+    M, L = len(levels), len(h) - 1
+    S, D = M ** L, M ** (L - 1)
+    sp = np.arange(S)
+    pred = (sp % D)[:, None] * M + np.arange(M)              # 状态 s' 的 M 个前驱 s
+    digits = (pred[..., None] // M ** np.arange(L - 1, -1, -1)) % M   # 前驱 s 的符号 a_{k-1..k-L}
+    out = h[0] * levels[sp // D][:, None] + levels[digits] @ h[1:]   # 分支期望输出 (S, M)
+    metric, tb = np.zeros(S), np.zeros((len(x), S), np.int8)
+    for k, xk in enumerate(x):
+        c = metric[pred] + (xk - out) ** 2
+        tb[k] = np.argmin(c, 1)
+        metric = c[sp, tb[k]]
+        metric -= metric.min()
+    s, a = int(np.argmin(metric)), np.zeros(len(x))
+    for k in range(len(x) - 1, -1, -1):
+        a[k] = levels[s // D]
+        s = pred[s, tb[k, s]]
+    return a
+
+
+def pf_mlse(ye, ref, n_train, levels, mem=1):
+    """FFE + 噪声白化后滤波 + MLSE（IM-DD 带宽受限 / 色散功率衰落的常用方案）：
+    FFE 输出的噪声因高频增强而有色。在训练段用最小二乘拟合 AR(mem) 预测器 e_k ≈ -Σ p_i·e_{k-i}，
+    后滤波 z = (1 + Σ p_i·D^i)·ye 使噪声变白，同时引入已知 ISI h = [1, p_1..p_mem]，再用 mlse 做序列检测。
+    返回判决电平序列（1 sps）。"""
+    e = ye[:n_train] - ref[:n_train]
+    A = np.stack([np.roll(e, i) for i in range(1, mem + 1)], 1)[mem:]
+    p = -np.linalg.lstsq(A, e[mem:], rcond=None)[0]
+    h = np.r_[1.0, p]
+    z = sum(h[i] * np.roll(ye, i) for i in range(mem + 1))
+    return mlse(z, h, levels)
+
+
 # =============== 频偏估计 ===============
 def foe(x, fs, method='fft', m=4, nfft=None):
     """频偏估计 [Hz]。
@@ -256,14 +338,15 @@ def vv(x, n=64, m=4, const=None):
     return x * np.exp(-1j * phi), phi
 
 
-def bps(x, const, n_test=32, n=64):
-    """盲相位搜索 BPS（Pfau 2009）：在 [-π/4, π/4) 内测试 n_test 个相位，取 n 点窗内判决距离最小者，
-    再做 π/2 周期解卷绕。适合任意 QAM。返回 (校正后, φ)，含 π/2 模糊。"""
-    phis = (np.arange(n_test) / n_test - 0.5) * np.pi / 2
+def bps(x, const, n_test=32, n=64, rot=4):
+    """盲相位搜索 BPS（Pfau 2009）：在 [-π/rot, π/rot) 内测试 n_test 个相位，取 n 点窗内判决距离最小者，
+    再做 2π/rot 周期解卷绕。rot 为星座旋转对称阶数（tx.rot_order：QAM/QPSK 4，BPSK 2，8PSK 8）。
+    返回 (校正后, φ)，含 2π/rot 模糊。"""
+    phis = (np.arange(n_test) / n_test - 0.5) * 2 * np.pi / rot
     x = np.atleast_2d(x)
     d = np.stack([np.min(np.abs((x * np.exp(-1j * p))[..., None] - const) ** 2, -1) for p in phis], -1)
     phi = phis[np.argmin(uniform_filter1d(d, n, axis=1, mode='nearest'), -1)]
-    phi = np.unwrap(phi * 4, axis=-1) / 4
+    phi = np.unwrap(phi * rot, axis=-1) / rot
     return x * np.exp(-1j * phi), phi
 
 
@@ -310,20 +393,52 @@ def sync(y, ref, use_abs=False):
     return np.roll(y[perm], -lag, axis=-1)[:, :Nr], lag, perm
 
 
-def fix_ambiguity(y, ref, mask=None, n=None):
-    """用已知符号（mask 标记的训练/导频）消除每偏振 π/2 整数倍相位模糊。
+def fix_ambiguity(y, ref, mask=None, n=None, rot=4):
+    """用已知符号（mask 标记的训练/导频）消除每偏振 2π/rot 整数倍相位模糊（QAM/QPSK rot=4，8PSK rot=8）。
 
     n=None：全局一个旋转量；给 n：对已知符号 n 点滑动平均逐段判定（导频辅助周跳消除）。
     """
     N = y.shape[-1]
+    step = 2 * np.pi / rot
     idx = np.arange(N) if mask is None else np.flatnonzero(mask)
     r = y[:, idx] * np.conj(ref[:, idx])
     if n is None:
-        k = np.round(np.angle(np.sum(r, -1)) / (np.pi / 2))[:, None]
+        k = np.round(np.angle(np.sum(r, -1)) / step)[:, None]
     else:
-        k = np.round(np.angle(_movmean(r, n)) / (np.pi / 2))
+        k = np.round(np.angle(_movmean(r, n)) / step)
         k = k[:, np.maximum(np.searchsorted(idx, np.arange(N), 'right') - 1, 0)]
-    return y * np.exp(-1j * k * np.pi / 2)
+    return y * np.exp(-1j * k * step)
+
+
+# =============== OFDM ===============
+def ofdm_demod(y, nfft, ncp):
+    """OFDM 解调：串并转换 -> 去循环前缀 -> FFT（与 tx.ofdm_mod 互逆）。返回 (nsym, nfft)。"""
+    n = nfft + ncp
+    return np.fft.fft(y[:len(y) // n * n].reshape(-1, n)[:, ncp:], axis=-1) / np.sqrt(nfft)
+
+
+def ofdm_eq(Y, X, n_train=1, pilots=None):
+    """OFDM 单抽头频域均衡：前 n_train 个训练符号做 LS 信道估计 H = <Y/X>（各训练符号先对齐公共相位再平均，
+    避免激光相噪使平均失效），Y/H；给出 pilots（导频子载波下标）时再逐符号去除公共相位误差 CPE = ∠Σ_p Y·X*。
+    X 为已知发送符号（只用到训练行与导频列）。返回 (均衡后 Y, H)。"""
+    Hk = Y[:n_train] / np.where(X[:n_train] == 0, 1, X[:n_train])
+    Hc = np.mean(Hk * np.exp(-1j * np.angle(np.sum(Hk * np.conj(Hk[:1]), 1)))[:, None], 0)
+    Z = Y / np.where(Hc == 0, 1, Hc)
+    if pilots is not None:
+        Z = Z * np.exp(-1j * np.angle(np.sum(Z[:, pilots] * np.conj(X[:, pilots]), 1)))[:, None]
+    return Z, Hc
+
+
+def schmidl_cox(y, L, fs=1.0):
+    """Schmidl-Cox 定时与频偏估计：前导为两个相同的半符号（各 L 点）。
+    M(d) = |P(d)|²/R(d)²，P(d) = Σ_m y*[d+m]·y[d+m+L]，R(d) = Σ_m |y[d+m+L]|²；
+    返回 (d̂ = argmax M, 频偏 ∠P(d̂)·fs/(2πL)（范围 ±fs/(2L)）, M)。"""
+    c = lambda v: np.convolve(v, np.ones(L))[L - 1:len(y) - L]
+    P = c(np.conj(y[:-L]) * y[L:])
+    R = c(np.abs(y[L:]) ** 2)
+    M = np.abs(P) ** 2 / np.maximum(R, 1e-30) ** 2
+    d = int(np.argmax(M))
+    return d, np.angle(P[d]) * fs / (2 * np.pi * L), M
 
 
 # =============== 自相干 ===============

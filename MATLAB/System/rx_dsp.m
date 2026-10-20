@@ -9,6 +9,7 @@ function out = rx_dsp(r, cfg, ref)
 %         -> 帧同步 -> 模糊/周跳消除 -> (DD-LMS) -> 判决与指标
 %   cfg.nl_comp 可为函数句柄（输入/输出 2 sps 波形），如训练好的 LDBP：@(y) ldbp_apply(p, y)
 c = ref.const; f = ref.frame; kind = ref.kind; fib = cfg.fib;
+rot = rot_order(c);                                % 旋转对称阶数：QAM/QPSK 4，BPSK 2，8PSK 8
 fs2 = 2*cfg.rs;
 % 1) 前端：去直流 + GSOP 正交化 + 重采样到 2 sps
 y = resamp(gsop(r), cfg.fs_adc, fs2);
@@ -33,16 +34,16 @@ n0 = min(10000, floor(size(y,2)/4));
 [y, ~, out.eq_err] = mimo_eq(y, cfg.ntaps, cfg.mu_rde, 2, 'rde', c, [], 0, W);
 y = normpow(y);
 % 5) 频偏估计与补偿（1 sps）
-out.fo = foe(y, cfg.rs);
+out.fo = foe(y, cfg.rs, 'fft', rot);
 y = fo_comp(y, out.fo, cfg.rs);
 % 6) 载波相位恢复 + 同步 + 模糊消除（训练+导频辅助周跳消除）
-if strcmp(cfg.cpr, 'vv'), yb = cpr_vv(y, 64, 4, c); else, yb = cpr_bps(y, c); end
+if strcmp(cfg.cpr, 'vv'), yb = cpr_vv(y, 64, rot, c); else, yb = cpr_bps(y, c, 32, 64, rot); end
 [yb, out.lag, perm] = frame_sync(yb, f);
 if strcmp(cfg.cpr, 'pilot')
     ya = circshift(y(perm,:), -out.lag, 2);
     y = cpr_pilot(ya(:, 1:size(f,2)), f, kind == 2, 5);
 else
-    y = fix_ambiguity(yb, f, kind > 0, 5);
+    y = fix_ambiguity(yb, f, kind > 0, 5, rot);
 end
 % 7) 可选 DD-LMS 精均衡
 if cfg.dd_lms, y = mimo_eq(y, 7, 1e-4, 1, 'dd', c); end

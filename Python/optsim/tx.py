@@ -1,4 +1,4 @@
-"""发射端数字部分：比特、星座映射/解映射、LLR、概率整形、成帧、脉冲成形与匹配滤波。
+"""发射端数字部分：比特、星座映射/解映射、差分 QAM、LLR、概率整形、成帧、脉冲成形与匹配滤波、OFDM 调制。
 
 星座数组约定：const[label] 为比特标签 label（MSB 在前）对应的符号；QAM 归一化到单位平均功率。
 """
@@ -62,6 +62,38 @@ def psk(M):
     return c
 
 
+def constellation(fmt, M):
+    """按格式名取相干星座（单位平均功率）：fmt = 'qam' | 'psk'。"""
+    return {'qam': qam, 'psk': psk}[fmt](M)
+
+
+def rot_order(const):
+    """星座的旋转对称阶数 m：绕原点旋转 2π/m 后与自身重合的最大 m。
+    QAM / QPSK → 4，BPSK → 2，8PSK → 8。决定 FOE 的 M 次方、BPS 搜索范围与相位模糊步长 2π/m。"""
+    for m in range(len(const), 1, -1):
+        if np.all(np.min(np.abs(const[:, None] * np.exp(2j * np.pi / m) - const), 1) < 1e-9):
+            return m
+    return 1
+
+
+def diff_psk(bits, M):
+    """差分 M-PSK 编码（DBPSK / DQPSK / D8PSK）：每 log2(M) 比特（Gray）决定相位增量 Δφ = 2π·i/M，
+    s_k = s_{k-1}·e^{jΔφ_k}，s_{-1} = 1。bits (..., n·k) -> 单位幅度符号 (..., n)。
+    接收端只需相邻符号的差分积 z_k = y_k·y*_{k-1}（DLI 直接检测或数字差分），用 diff_psk_demod 判决。"""
+    k = int(np.log2(M))
+    lab = np.asarray(bits).reshape(np.shape(bits)[:-1] + (-1, k)).astype(int) @ (1 << np.arange(k - 1, -1, -1))
+    inc = np.argsort(_gray(M))[lab]                           # Gray 标签 -> 增量序号 i
+    return np.exp(2j * np.pi / M * np.cumsum(inc, -1))
+
+
+def diff_psk_demod(z, M):
+    """差分 M-PSK 判决：z = y_k·y*_{k-1}，就近判 Δφ = 2π·i/M，i -> Gray 标签 -> 比特 (..., n·k)。"""
+    k = int(np.log2(M))
+    i = np.round(np.angle(z) / (2 * np.pi / M)).astype(int) % M
+    b = (_gray(M)[i][..., None] >> np.arange(k - 1, -1, -1)) & 1
+    return b.reshape(np.shape(z)[:-1] + (-1,)).astype(np.uint8)
+
+
 def modulate(bits, const):
     """比特 -> 符号。bits 形状 (n·k,) 或 (P, n·k)，返回 (n,) 或 (P, n)。"""
     k = int(np.log2(len(const)))
@@ -79,6 +111,36 @@ def demodulate(x, const):
     k = int(np.log2(len(const)))
     idx = decide(x, const)
     return np.array([int2bits(i, k) for i in np.atleast_2d(idx)]).reshape(np.shape(x)[:-1] + (-1,))
+
+
+def _quadrant_points(M):
+    """方形 QAM 第一象限的 M/4 个点（I、Q 符号位均为 1 的标签，象限内保持 Gray）。"""
+    k = int(np.log2(M))
+    h = k // 2
+    j = np.arange(M // 4)
+    return qam(M)[(1 << (k - 1)) | ((j >> (h - 1)) << h) | (1 << (h - 1)) | (j & ((1 << (h - 1)) - 1))]
+
+
+def diff_qam(bits, M):
+    """差分象限编码 QAM（对 π/2 整数倍相位模糊和周跳免疫）：每符号前 2 比特（Gray）差分编码象限
+    q_k = q_{k-1} + u_k (mod 4)，其余比特映射到第一象限的点，再乘 j^{q_k}。M=4 即 DQPSK。
+    bits (..., n·k) -> 符号 (..., n)；解调用 diff_qam_demod。"""
+    k = int(np.log2(M))
+    b = np.asarray(bits).reshape(np.shape(bits)[:-1] + (-1, k)).astype(int)
+    u = np.array([0, 1, 3, 2])[2 * b[..., 0] + b[..., 1]]
+    j = b[..., 2:] @ (1 << np.arange(k - 3, -1, -1)) if k > 2 else 0
+    return _quadrant_points(M)[j] * 1j ** (np.cumsum(u, -1) % 4)
+
+
+def diff_qam_demod(y, M):
+    """diff_qam 的硬判决解调：象限 q = ⌊∠y/(π/2)⌋，旋回第一象限判决内层比特，u = q_k − q_{k-1}。返回比特 (..., n·k)。"""
+    k = int(np.log2(M))
+    q = np.floor(np.mod(np.angle(y), 2 * np.pi) / (np.pi / 2)).astype(int) % 4
+    j = decide(y * (-1j) ** q, _quadrant_points(M))
+    u = np.array([0, 1, 3, 2])[np.diff(q, axis=-1, prepend=0) % 4]
+    b = np.concatenate([(u[..., None] >> 1) & 1, u[..., None] & 1,
+                        (j[..., None] >> np.arange(k - 3, -1, -1)) & 1], -1)
+    return b.reshape(np.shape(y)[:-1] + (-1,)).astype(np.uint8)
 
 
 def llr(x, const, sigma2, prior=None, maxlog=False):
@@ -162,3 +224,11 @@ def pulse_shape(sym, sps, beta, kind='rrc'):
 def matched_filter(x, sps, beta):
     """接收端 RRC 匹配滤波（输入 sps 倍过采样，输出同采样率）。"""
     return fft_filter(x, nyquist_response(freq(x.shape[-1], sps), 1.0, beta))
+
+
+# ---------------- OFDM ----------------
+def ofdm_mod(X, ncp):
+    """OFDM 调制：X (nsym, nfft) 子载波符号（FFT 顺序，0 为空载波）-> IFFT（×√nfft 保持功率）
+    -> 加循环前缀 ncp -> 串行输出 (nsym·(nfft+ncp),)。解调见 dsp.ofdm_demod。"""
+    x = np.fft.ifft(X, axis=-1) * np.sqrt(X.shape[-1])
+    return np.hstack([x[:, x.shape[1] - ncp:], x]).ravel()

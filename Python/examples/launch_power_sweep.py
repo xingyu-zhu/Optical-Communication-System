@@ -1,4 +1,5 @@
-"""单信道入纤功率扫描：CDC vs DBP，并与 GN 模型预测对比（Kerr 非线性与最优入纤功率）。"""
+"""单信道入纤功率扫描：CDC vs PB-NLC vs DBP，并与 GN 模型预测对比（Kerr 非线性与最优入纤功率）。
+PB-NLC 接在 CDC 链路之后（CPR 后 1 sps），用帧前 n_train 个符号最小二乘拟合微扰系数；三种方法都在其后的数据符号上评估。"""
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from dataclasses import replace
@@ -6,7 +7,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from optsim import devices as dev, channel
+from optsim import devices as dev, channel, dsp, metrics
 from optsim.system import Config, tx_signal, rx_dsp
 
 cfg = Config(M=16, n_blocks=300, n_spans=10, fs_adc=160e9, fib_kw={'pmd': 0})
@@ -14,15 +15,22 @@ fib = cfg.fib
 ref = tx_signal(cfg)
 N = ref['wave'].shape[1]
 powers = np.arange(-2, 7, 2.0)
-snr = {'cdc': [], 'dbp': []}
+snr = {'cdc': [], 'pb-nlc': [], 'dbp': []}
+n_train = 5000
+te = (ref['kind'] == 0) & (np.arange(len(ref['kind'])) >= n_train)    # 评估用数据符号
+f = ref['frame']
 for p in powers:
     rng = np.random.default_rng(1)
     E = dev.edfa(ref['wave'] * dev.laser(N, cfg.fs, 0, rng=rng), cfg.fs, p_out_dbm=p, nf_db=fib['nf'], f0=fib['f0'], rng=rng)
     E = channel.link(E, cfg.fs, fib, cfg.n_spans, phi_max=cfg.phi_max, rng=rng)
     r = dev.coherent_rx(E, dev.laser(N, cfg.fs, 10), cfg.fs, shot=False)
-    for m in snr:
-        snr[m].append(rx_dsp(r, replace(cfg, p_launch=p, nl_comp=m, dbp_steps=10), ref)['snr'])
-    print(f"P {p:+.0f} dBm: SNR CDC {snr['cdc'][-1]:.2f} dB, DBP {snr['dbp'][-1]:.2f} dB")
+    for m in ('cdc', 'dbp'):
+        y = rx_dsp(r, replace(cfg, p_launch=p, nl_comp=m, dbp_steps=10), ref)['y']
+        snr[m].append(metrics.snr(y[:, te], f[:, te]))
+        if m == 'cdc':
+            yp, _ = dsp.pb_nlc(y, f, n_train, L=10)
+            snr['pb-nlc'].append(metrics.snr(yp[:, te], f[:, te]))
+    print(f"P {p:+.0f} dBm: SNR CDC {snr['cdc'][-1]:.2f} dB, PB-NLC {snr['pb-nlc'][-1]:.2f} dB, DBP {snr['dbp'][-1]:.2f} dB")
 
 pg = np.linspace(-4, 8, 100)
 gn = channel.gn_model(pg, fib, cfg.rs, cfg.n_spans)

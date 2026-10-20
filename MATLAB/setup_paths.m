@@ -2,5 +2,5 @@
 root = fileparts(mfilename('fullpath'));
 addpath(fullfile(root, 'Utils'), fullfile(root, 'Tx'), fullfile(root, 'Components'), ...
         fullfile(root, 'Channel'), fullfile(root, 'DSP'), fullfile(root, 'Metrics'), fullfile(root, 'System'), ...
-        fullfile(root, 'NN'));
+        fullfile(root, 'NN'), fullfile(root, 'FEC'), fullfile(root, 'Sensing'), fullfile(root, 'ISAC'));
 if ~exist(fullfile(root, 'results'), 'dir'), mkdir(fullfile(root, 'results')); end

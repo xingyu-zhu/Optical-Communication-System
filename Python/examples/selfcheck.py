@@ -117,3 +117,57 @@ report('FWM (DSF vs SSMF)', fwm['DSF'] > fwm['SSMF'] + 15, f"product/pump: DSF {
 en = channel.gn_eta(fib, 32e9, 5, 32e9, 'numeric')
 ec = channel.gn_eta(fib, 32e9, 5, 32e9, 'closed')
 report('GN numeric vs closed', abs(10 * np.log10(en / ec)) < 1, f'η {en:.1f} vs {ec:.1f} 1/W² per span ({10 * np.log10(en / ec):+.2f} dB)')
+
+print('---- More algorithms ----')
+from optsim import fec
+# 13) OFDM：Schmidl-Cox 定时/频偏 + 3 径信道 + LS 信道估计 + 导频 CPE
+nfft, ncp, Lsc = 256, 16, 64
+Xo = c[rng.integers(0, M, (40, nfft))]
+Xo[:, 0] = 0
+half = np.exp(2j * np.pi * rng.random(Lsc))
+sig = np.r_[np.zeros(100), half, half, tx.ofdm_mod(Xo, ncp), np.zeros(10)]
+yo = awgn(np.convolve(sig, [1, 0.3 + 0.2j, 0.1])[:len(sig)] * np.exp(2j * np.pi * 1e-3 * np.arange(len(sig))), 25, rng=rng)
+d, fo, _ = dsp.schmidl_cox(yo, Lsc)
+st = d + 2 * Lsc - ncp // 2                          # 定时回退半个 CP，避免晚采引入符号间干扰
+Yo = dsp.ofdm_demod(dsp.fo_comp(yo, fo, 1.0)[st:], nfft, ncp)[:len(Xo)]
+Zo, _ = dsp.ofdm_eq(Yo, Xo, 2, np.arange(1, nfft, 16))
+so = metrics.snr(Zo[2:, 1:], Xo[2:, 1:])
+# 理论 SNR = 1/mean(σ²·(1 + E[1/|X|²]/n_train)/|H|²)：频率选择性信道 + 2 个训练符号的 LS 估计噪声
+Hf = np.abs(np.fft.fft([1, 0.3 + 0.2j, 0.1], nfft)[1:]) ** 2
+sth = -10 * np.log10(np.mean((1 + np.mean(1 / np.abs(c) ** 2) / 2) * 10 ** -2.5 * np.mean(np.abs(sig) ** 2) * 1.14 / Hf))
+report('OFDM + Schmidl-Cox', abs(fo - 1e-3) < 1e-4 and so > sth - 1, f'd {d} (true 100), CFO {fo:.2e} (true 1e-3), SNR {so:.1f} dB (theory {sth:.1f})')
+
+# 14) 差分 QAM：中途 π/2 周跳不扩散
+bd = tx.rand_bits((2, 4 * 8000), rng)
+rd = awgn(tx.diff_qam(bd, 16), 16, rng=rng)
+rd[:, 4000:] *= 1j
+bdd, _ = metrics.ber(bd, tx.diff_qam_demod(rd, 16))
+report('Differential 16QAM + slip', bdd < 3 * metrics.ber_theory(16, 16), f'BER {bdd:.2e} (Gray, no slip {metrics.ber_theory(16, 16):.2e})')
+
+# 15) IM-DD：FFE / DFE / MLSE（PAM4，强 ISI 信道 [1, 0.9, 0.5]）
+lv = tx.pam(4)
+a = lv[rng.integers(0, 4, 40000)]
+xr = np.convolve(a, [1, 0.9, 0.5])[:len(a)] + 0.25 * rng.standard_normal(len(a))
+dec = lambda v: lv[np.argmin(np.abs(v[:, None] - lv), 1)]
+ser_f = np.mean(dec(dsp.ffe(xr, a, 21, 2e-4, 1, 8000, lv)[0])[10000:] != a[10000:])
+ser_d = np.mean(dec(dsp.dfe(xr, a, 21, 3, 2e-4, 1, 8000, lv)[0])[10000:] != a[10000:])
+ser_m = np.mean(dsp.mlse(xr, dsp.ch_est(xr[:8000], a[:8000], 3), lv)[10000:] != a[10000:])
+report('PAM4 FFE / DFE / MLSE', ser_m < ser_d < ser_f, f'SER {ser_f:.2e} / {ser_d:.2e} / {ser_m:.2e}')
+
+# 16) PB-NLC：合成的一阶 SPM/IXPM 型失真 y = s·exp(jε(|s_k|² + 0.5|s_k±1|²)) + 噪声
+pw = np.sum(np.abs(s) ** 2, 0)
+yn = awgn(s * np.exp(0.25j * (pw + 0.5 * np.roll(pw, 1) + 0.5 * np.roll(pw, -1))), 24, rng=rng)
+yp, _ = dsp.pb_nlc(yn, s, 8000, L=3)
+s0_, s1_ = metrics.snr(yn[:, 8000:], s[:, 8000:]), metrics.snr(yp[:, 8000:], s[:, 8000:])
+report('PB-NLC (synthetic)', s1_ > s0_ + 2, f'SNR {s0_:.1f} -> {s1_:.1f} dB')
+
+# 17) LDPC (3,6) n=1944 + QPSK @ 3 dB：软判决译码
+code = fec.ldpc_make(1944, 3, 6, rng)
+u = rng.integers(0, 2, (20, code['k']))
+cw = fec.ldpc_encode(u, code)
+q4 = tx.qam(4)
+sq = tx.modulate(cw.ravel(), q4)
+rq = awgn(sq, 3, rng=rng)
+bh, ok = fec.ldpc_decode(tx.llr(rq, q4, 10 ** -0.3).reshape(len(u), -1), code)
+pre, post = np.mean(tx.demodulate(rq, q4) != cw.ravel()), np.mean(bh[:, code['free']] != u)
+report('LDPC NMS decoding', post < 1e-4 < pre, f'pre-FEC {pre:.2e} -> post-FEC {post:.1e}, NGMI {metrics.ngmi(rq, sq, q4):.3f}, rate {code["k"] / 1944:.3f}')

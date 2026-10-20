@@ -2,16 +2,16 @@
 
 电域   : quantize, dac, adc
 光源   : laser
-调制器 : mzm, iq_mod, dp_iq_mod, phase_mod
+调制器 : mzm, iq_mod, dp_iq_mod, phase_mod, eml（电吸收调制，带啁啾）, dml（直调激光器，瞬态+绝热啁啾）
 放大/滤波 : ase_psd, add_noise, edfa, set_osnr, voa, optical_filter
 WDM    : freq_shift, wdm_mux
 偏振   : rotator, random_unitary, pdl, dgd
-接收   : hybrid_90, photodiode, bpd, coherent_rx
+接收   : hybrid_90, photodiode（PIN + TIA 噪声）, apd, bpd, coherent_rx, dli, dli_rx（差分直接检测）
 
 约定：光场单位 √W，|E|² 为瞬时功率 [W]；双偏振为 (2, N)；工程约定 E·exp(+jω0t)。
 """
 import numpy as np
-from .utils import (H, Q, KB, F0, db2lin, dbm2w, total_power, freq, fft_filter, lpf, resample, iq_delay)
+from .utils import (H, Q, KB, F0, db2lin, dbm2w, total_power, freq, fft_filter, lpf, resample, iq_delay, delay)
 
 
 # ================= 电域器件 =================
@@ -95,6 +95,28 @@ def dp_iq_mod(E, u, vpi=1.0, **kw):
 def phase_mod(E, v, vpi=1.0):
     """相位调制器：E·exp(jπv/Vπ)。"""
     return E * np.exp(1j * np.pi * v / vpi)
+
+
+def eml(E, u, er_db=8.0, alpha=0.5):
+    """电吸收调制器 EAM（EML 中与激光集成）：吸收随电压近似指数变化，功率透过率
+    T(u) = 10^{-ER·(1-u)/20}（u ∈ [-1, 1]，u=1 最亮、u=-1 最暗，消光比 ER [dB]），
+    并带瞬态啁啾（Henry 因子 α）：E_out = E_in·T^{(1+jα)/2}，即 Δφ = (α/2)·ln T。
+    α>0 时在 C 波段 SSMF 中加剧色散功率衰落，α<0 可部分抵消。"""
+    T = 10 ** (-er_db * (1 - np.clip(u, -1, 1)) / 20)
+    return E * T ** ((1 + 1j * alpha) / 2)
+
+
+def dml(u, fs, p_dbm=5.0, er_db=4.0, alpha=3.0, k_ad=1e12, bw=None, linewidth=1e6, rin_db=-145, rng=None):
+    """直调激光器 DML（大信号啁啾模型，Koch & Bowers）：P(t) = P̄·(1 + m·u)，m = (ER-1)/(ER+1)，
+    频率啁啾 Δν = α/(4π)·[d ln P/dt + κP]，其中绝热啁啾系数 k_ad = ακ/(4π) [Hz/W]（典型 0.5~2 GHz/mW = 0.5~2e12 Hz/W）。
+    参数: u 归一化驱动 [-1, 1]（bw 为驱动/弛豫振荡带宽限制）; linewidth、rin_db 见 laser
+    返回: (N,) 复光场。绝热啁啾的平均频移（与 P̄ 成正比）只是载波偏移，已去除以保持循环连续。"""
+    rng = np.random.default_rng(rng)
+    u = lpf(u, fs, bw).real if bw else u
+    m = (db2lin(er_db) - 1) / (db2lin(er_db) + 1)
+    P = dbm2w(p_dbm) * np.maximum(1 + m * u, 1e-3)
+    phi = alpha / 2 * np.log(P) + 2 * np.pi * k_ad * np.cumsum(P - P.mean()) / fs
+    return np.sqrt(P) * np.exp(1j * phi) * laser(len(P), fs, 0, linewidth, rin_db=rin_db, rng=rng) / np.sqrt(1e-3)
 
 
 # ================= 放大器、衰减、滤波 =================
@@ -182,16 +204,30 @@ def hybrid_90(Es, Elo):
     return np.stack([Es + Elo, Es - Elo, Es + 1j * Elo, Es - 1j * Elo]) / 2
 
 
-def photodiode(E, fs, R=1.0, bw=None, i_dark=0.0, T=None, RL=50.0, shot=True, rng=None):
+def photodiode(E, fs, R=1.0, bw=None, i_dark=0.0, T=None, RL=50.0, shot=True, irnd=None, rng=None):
     """PIN 光电二极管：i = R·Σ|E|² + i_dark + 散粒噪声 + 热噪声，再经带宽 bw 低通。
 
     参数: R 响应度 [A/W]; i_dark 暗电流 [A]; T 温度 [K]（None 不计热噪声）; RL 负载/跨阻等效电阻 [Ω];
-          shot 是否计散粒噪声（方差 2q·<i>·fs/2）
+          shot 是否计散粒噪声（方差 2q·<i>·fs/2）;
+          irnd TIA 输入等效噪声电流密度 [A/√Hz]（典型 10~20 pA/√Hz，即 1e-11~2e-11），给出时方差 irnd²·fs/2
     """
     rng = np.random.default_rng(rng)
     i = R * np.sum(np.abs(np.atleast_2d(E)) ** 2, axis=0) + i_dark
     B = fs / 2
-    var = (2 * Q * np.mean(i) * B if shot else 0) + (4 * KB * T * B / RL if T else 0)
+    var = (2 * Q * np.mean(i) * B if shot else 0) + (4 * KB * T * B / RL if T else 0) + (irnd ** 2 * B if irnd else 0)
+    i = i + np.sqrt(var) * rng.standard_normal(i.shape)
+    return lpf(i, fs, bw).real if bw else i
+
+
+def apd(E, fs, M=10.0, R=0.8, ka=0.5, bw=None, i_dark=10e-9, irnd=None, T=None, RL=50.0, rng=None):
+    """雪崩光电二极管 APD：i = M·R·P；倍增散粒噪声方差 2q·M²·F(M)·(R·P̄ + i_dark)·B，
+    过剩噪声因子 F = ka·M + (1-ka)(2 - 1/M)（McIntyre，ka 为电离系数比；InGaAs/InP ≈ 0.4~0.5，Si ≈ 0.02）；
+    再加 TIA 噪声（irnd 或 T/RL）。增益提升信号、压过热噪声，但 M 过大时倍增噪声主导 → 存在最优 M。"""
+    rng = np.random.default_rng(rng)
+    i = M * R * np.sum(np.abs(np.atleast_2d(E)) ** 2, axis=0)
+    B = fs / 2
+    F = ka * M + (1 - ka) * (2 - 1 / M)
+    var = 2 * Q * M ** 2 * F * (np.mean(i) / M + i_dark) * B + (4 * KB * T * B / RL if T else 0) + (irnd ** 2 * B if irnd else 0)
     i = i + np.sqrt(var) * rng.standard_normal(i.shape)
     return lpf(i, fs, bw).real if bw else i
 
@@ -216,3 +252,22 @@ def coherent_rx(E, Elo, fs, skew=(0, 0, 0, 0), rng=None, **pd_kw):
         i = bpd(o[0], o[1], fs, rng=rng, **pd_kw) + 1j * bpd(o[2], o[3], fs, rng=rng, **pd_kw)
         out.append(iq_delay(i, skew[2 * p], skew[2 * p + 1], fs) if any(skew) else i)
     return np.stack(out)
+
+
+def dli(E, fs, tau, phi=0.0):
+    """延迟线干涉仪（DLI，非对称 MZI）：两臂时延差 tau、相位偏置 phi。
+    输出 (相长口, 相消口) = (E(t) + e^{jφ}E(t-τ))/2, (E(t) - e^{jφ}E(t-τ))/2。"""
+    Ed = np.exp(1j * phi) * delay(E, tau, fs)
+    return (E + Ed) / 2, (E - Ed) / 2
+
+
+def dli_rx(E, fs, rs, rng=None, **pd_kw):
+    """差分相位直接检测接收机（DPSK/DQPSK/D8PSK）：3 dB 分光 -> 两个 1 符号延迟 DLI（φ = 0、π/2）-> 两个 BPD。
+    I = Re{E(t)E*(t-T)}/2，Q = Im{E(t)E*(t-T)}/2（φ=π/2 臂），返回复电流 z = I + jQ ∝ y_k·y*_{k-1}。
+    无需本振、对激光相位噪声（线宽 << 符号率）与小频偏不敏感；多行输入（双偏振）时功率相加，偏振不敏感。"""
+    rng = np.random.default_rng(rng)
+    out = []
+    for phi in (0.0, np.pi / 2):
+        a, b = dli(E / np.sqrt(2), fs, 1 / rs, phi)
+        out.append(bpd(a, b, fs, rng=rng, **pd_kw))
+    return out[0] + 1j * out[1]

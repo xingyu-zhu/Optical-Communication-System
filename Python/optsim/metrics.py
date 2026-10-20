@@ -5,6 +5,7 @@ from .tx import decide, int2bits, llr
 
 HD_FEC = 3.8e-3    # 7% 开销硬判决 FEC 门限
 SD_FEC = 2.0e-2    # ~20% 开销软判决 FEC 门限
+KP4_FEC = 2.4e-4   # IEEE 802.3 KP4 RS(544,514) 门限（数据中心 IM-DD PAM4 常用）
 
 
 def ber(tx_bits, rx_bits):
@@ -35,14 +36,38 @@ def q_factor(b):
 
 
 def ber_theory(M, snr_db, kind='qam'):
-    """AWGN 下 Gray 映射理论 BER（最近邻近似）。kind: 'qam' | 'psk' | 'pam'；snr_db 为每符号 SNR。"""
+    """AWGN 下 Gray 映射理论 BER。snr_db 为每符号 SNR (Es/N0)。
+    kind: 'qam'（最近邻近似）| 'psk'（相干，BPSK/QPSK 精确）| 'pam' |
+          'dpsk'（差分检测：DBPSK 精确 ½e^{-SNR}，DQPSK 精确 Marcum-Q 式，M≥8 近似）"""
     s, k = 10 ** (np.asarray(snr_db) / 10), np.log2(M)
     Qf = lambda v: 0.5 * erfc(v / np.sqrt(2))
     if kind == 'qam':
         return 4 / k * (1 - 1 / np.sqrt(M)) * Qf(np.sqrt(3 * s / (M - 1)))
     if kind == 'psk':
-        return 2 / k * Qf(np.sqrt(2 * s) * np.sin(np.pi / M)) if M > 4 else Qf(np.sqrt(s))
+        if M == 2:
+            return Qf(np.sqrt(2 * s))
+        return Qf(np.sqrt(s)) if M == 4 else 2 / k * Qf(np.sqrt(2 * s) * np.sin(np.pi / M))
+    if kind == 'dpsk':
+        if M == 2:
+            return 0.5 * np.exp(-s)
+        if M == 4:                                           # Proakis 式 (8.6-62)，γb = SNR/2
+            from scipy.stats import ncx2
+            from scipy.special import i0e
+            a2, b2 = s * (1 - 1 / np.sqrt(2)), s * (1 + 1 / np.sqrt(2))
+            return ncx2.sf(b2, 2, a2) - 0.5 * i0e(np.sqrt(a2 * b2)) * np.exp(np.sqrt(a2 * b2) - (a2 + b2) / 2)
+        return 2 / k * Qf(np.sqrt(2 * s) * np.sin(np.pi / (np.sqrt(2) * M)))
     return 2 * (M - 1) / (M * k) * Qf(np.sqrt(3 * s / (M ** 2 - 1)))
+
+
+def sensitivity(x, ber_values, thr=KP4_FEC):
+    """接收灵敏度：在 log10(BER)–x 曲线上线性插值，求 BER 恰为 thr 时的 x（如 ROP [dBm] 或 OSNR [dB]）。
+    BER 须随 x 单调下降；未跨过门限时返回 nan。"""
+    lb = np.log10(np.maximum(np.asarray(ber_values, float), 1e-12))
+    i = np.flatnonzero((lb[:-1] >= np.log10(thr)) & (lb[1:] < np.log10(thr)))
+    if len(i) == 0:
+        return np.nan
+    i = i[0]
+    return x[i] + (np.log10(thr) - lb[i]) / (lb[i + 1] - lb[i]) * (x[i + 1] - x[i])
 
 
 def gmi(rx, tx, const, prior=None):
@@ -55,6 +80,12 @@ def gmi(rx, tx, const, prior=None):
     b = int2bits(decide(tx, const), k)
     Hx = k if prior is None else -np.sum(prior * np.log2(prior))
     return Hx - np.mean(np.logaddexp(0, -(1 - 2.0 * b) * L)) / np.log(2) * k
+
+
+def ngmi(rx, tx, const, prior=None):
+    """归一化 GMI：NGMI = 1 − (H(X) − GMI)/log2(M)（SD-FEC 门限常用 NGMI 判定，如 0.8~0.9）。"""
+    Hx = np.log2(len(const)) if prior is None else -np.sum(prior * np.log2(prior))
+    return 1 - (Hx - gmi(rx, tx, const, prior)) / np.log2(len(const))
 
 
 def mi(rx, tx, const, prior=None):
