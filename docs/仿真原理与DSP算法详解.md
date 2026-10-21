@@ -45,6 +45,8 @@
                                       判决 ──► BER/SNR/EVM/GMI
 ```
 
+![系统整体框图](figures/system_block_diagram.png)
+
 每一级都有对应的仿真函数（Python / MATLAB 对照）：
 
 | 阶段 | 作用 | Python | MATLAB |
@@ -255,8 +257,8 @@ $$
 | $-\alpha/2\,\mathbf E$ | 光纤损耗 | `fib['alpha']` [dB/km] |
 | $-j\beta_2/2\,\partial_t^2$ | 群速度色散（GVD, Group Velocity Dispersion） | `fib['D']` [ps/(nm·km)] |
 | $\beta_3/6\,\partial_t^3$ | 三阶色散 / 色散斜率 | `fib['S']` [ps/(nm²·km)] |
-| $\gamma\frac{8}{9}|\mathbf E|^2\mathbf E$ 的瞬时部分 | **Kerr 非线性**：自相位调制 SPM、交叉相位调制 XPM、四波混频 FWM | `fib['gamma']` [1/(W·km)] |
-| $f_R\,(h_R\otimes|\mathbf E|^2)$ | **受激拉曼散射**（SRS, Stimulated Raman Scattering）的延迟响应 | `fib['raman']` 开关，`fib['fR']` |
+| $\gamma\frac{8}{9}\|\mathbf E\|^2\mathbf E$ 的瞬时部分 | **Kerr 非线性**：自相位调制 SPM、交叉相位调制 XPM、四波混频 FWM | `fib['gamma']` [1/(W·km)] |
+| $f_R\,(h_R\otimes\|\mathbf E\|^2)$ | **受激拉曼散射**（SRS, Stimulated Raman Scattering）的延迟响应 | `fib['raman']` 开关，`fib['fR']` |
 | $(1+j\omega_0^{-1}\partial_t)$ | **自陡峭**（self-steepening），对应时域脉冲前沿变陡 | `fib['steep']` 开关 |
 
 **单信道仿真中只对该信道波形求解即包含 SPM（含信道内 IXPM/IFWM）**；若把多个波分复用信道合波后对**全场**求解，XPM 与 FWM 会在求解过程中自动产生——求解器不对信道间相互作用做任何近似，这是分步傅里叶法相对于微扰法（perturbation-based）的优势，代价是计算量大。
@@ -441,7 +443,9 @@ ADC 输出(2,N) @fs_adc
 ⑪ 功率归一化 → 去训练/导频 → 硬判决 → BER/SNR/EVM/GMI
 ```
 
-下面逐项展开原理、公式与代码。
+下面逐项展开原理、公式与代码。在深入每一步之前，先直观感受不同损伤在星座图上留下的"指纹"——这决定了接下来每个算法分别要解决什么问题（完整 8 种损伤的交互式图鉴见配套 Notebook 附录 B）：
+
+![星座图诊断：常见损伤的指纹](figures/constellation_diagnosis.png)
 
 ### 8.1 前端校正
 
@@ -466,6 +470,10 @@ $$H_{\text{CDC}}(\omega)=\exp\Big[j\Big(\frac{\beta_2}{2}\omega^2+\frac{\beta_3}
 $$J(L)=\Big|\sum_t |x_{\text{CDC}(L)}(t)|^2\cdot e^{-j2\pi R_s t}\Big|$$
 
 残余色散会展宽符号间干扰、抹平平方律检测后的时钟频谱分量；只有补偿长度与真实长度匹配时，$J(L)$ 取最大值。
+
+未补偿色散对时域波形的破坏可以直接用眼图（Eye Diagram）看到——把波形按符号周期折叠叠加，"眼睛"张开代表判决裕量大，闭合代表码间串扰（ISI）严重：
+
+![眼图：色散导致码间串扰](figures/eye_diagram_cd.png)
 
 ### 8.3 非线性补偿：数字反向传播（DBP）
 
@@ -521,8 +529,8 @@ $$
 
 | 模式 | 误差信号 $e$ | 原理 | 适用阶段 |
 |---|---|---|---|
-| `cma` | $y(R_2-|y|^2)$，$R_2=E[|c|^4]/E[|c|^2]$ | **恒模算法**（Constant Modulus Algorithm）：盲算法，驱动输出幅度趋向星座的"等效模值" $R_2$。对高阶 QAM（非恒模星座）是近似收敛，用于**初始粗收敛** | 预收敛 |
-| `rde` | $y(R_d^2-|y|^2)$，$R_d$ 为最近星座半径 | **半径判决算法**（Radius-Directed Equalizer）：按多模值判决，比 CMA 更精确地刻画多环 QAM 的星座结构 | 精收敛 |
+| `cma` | $y(R_2-\|y\|^2)$，$R_2=E[\|c\|^4]/E[\|c\|^2]$ | **恒模算法**（Constant Modulus Algorithm）：盲算法，驱动输出幅度趋向星座的"等效模值" $R_2$。对高阶 QAM（非恒模星座）是近似收敛，用于**初始粗收敛** | 预收敛 |
+| `rde` | $y(R_d^2-\|y\|^2)$，$R_d$ 为最近星座半径 | **半径判决算法**（Radius-Directed Equalizer）：按多模值判决，比 CMA 更精确地刻画多环 QAM 的星座结构 | 精收敛 |
 | `mma` | 实部/虚部分别做 CMA（Modified/Multi-Modulus Algorithm） | 实虚分离，对某些相位模糊更鲁棒 | 备选 |
 | `lms` | 训练阶段 $d-y$（$d$=已知训练符号），之后判决引导 $d=\hat c$ | **数据辅助 LMS**：训练阶段收敛快且准确 | 有训练序列时 |
 | `dd` | $d-y$，$d$=判决符号（decision-directed） | 载波相位恢复**之后**的精细均衡，要求输入已基本无相位旋转 | 最后一级精调 |
@@ -536,6 +544,10 @@ y, w, err = dsp.mimo_eq(y, ntaps, mu_rde, 2, 'rde', const, w=w)
 ```
 
 **为什么 CMA/RDE 能自动解复用偏振？** 因为两路输出 $y_X,y_Y$ 都独立地被驱动向"恒模/多模"的代价函数最低点收敛，只要加入一个**正交化约束**防止两路收敛到同一个偏振分量（本实现未显式加入 Gram-Schmidt 去相关，依赖两路独立随机初始化+代价函数本身在实践中足以分离，这是 CMA 用于偏振解复用的标准做法，但理论上存在"奇异收敛"小概率风险，工程系统常加额外的去相关项）。
+
+两阶段的效果差异可以直接从星座上看出来——CMA 的代价函数对多环 QAM 存在天生的残余误差（它本质上是为恒模信号设计的），即使累积全部符号，簇也只是勉强、模糊地显现；切换到 RDE 后，用少得多的符号数就能得到清晰、紧凑的簇：
+
+![均衡器 CMA 与 RDE 的星座对比](figures/equalizer_cma_rde.png)
 
 ### 8.6 频偏估计（FOE, Frequency Offset Estimation）
 
@@ -674,13 +686,17 @@ $$z_k \propto y_k\,y_{k-1}^*$$
 | 指标 | 定义 | 说明 |
 |---|---|---|
 | BER（误码率） | $N_{\text{err}}/N_{\text{bits}}$ | 最终判据，样本量不足时统计意义有限（经验上需 $\gtrsim 100$ 个误比特） |
-| EVM（误差矢量幅度） | $100\sqrt{E|y-x|^2/E|x|^2}$ % | 直观反映星座弥散程度 |
-| SNR（有效信噪比） | 先做最小二乘复增益 $a=\langle x,y\rangle/\langle x,x\rangle$ 校正幅相，再算 $10\lg(|a|^2P_x/E|y-ax|^2)$ | 比直接算噪声方差更鲁棒（消除判决前残余的全局增益/相位偏差） |
+| EVM（误差矢量幅度） | $100\sqrt{E\|y-x\|^2/E\|x\|^2}$ % | 直观反映星座弥散程度 |
+| SNR（有效信噪比） | 先做最小二乘复增益 $a=\langle x,y\rangle/\langle x,x\rangle$ 校正幅相，再算 $10\lg(\|a\|^2P_x/E\|y-ax\|^2)$ | 比直接算噪声方差更鲁棒（消除判决前残余的全局增益/相位偏差） |
 | Q 因子 | $20\lg\big(\sqrt2\,\mathrm{erfcinv}(2\cdot\mathrm{BER})\big)$ [dB] | BER 的等效高斯信噪比表述，工程上常用 |
 | 理论 BER | Gray 映射 M-QAM 最近邻近似：$\frac{4}{k}(1-\tfrac1{\sqrt M})Q\big(\sqrt{3s/(M-1)}\big)$ | 用于与仿真/实验结果比对 |
 | **GMI**（广义互信息） | $H(X)-\dfrac1N\sum_k\sum_i\log_2\big(1+e^{-(1-2b_{ki})L_{ki}}\big)$ | 比特交织编码调制（BICM）系统的**可达速率**，比 BER 更能反映软判决 FEC 后的系统容量，是现代光通信系统评估的主流指标 |
-| **MI**（互信息） | 符号级，$E\big[\log_2 q(y|x)/\sum_s p(s)q(y|s)\big]$ | 理想无比特位独立假设下的可达速率上界 |
+| **MI**（互信息） | 符号级，$E\big[\log_2 q(y\|x)/\sum_s p(s)q(y\|s)\big]$ | 理想无比特位独立假设下的可达速率上界 |
 | OSNR↔SNR | $\mathrm{SNR}=\mathrm{OSNR}+10\lg(2B_{\text{ref}}/(N_{\text{pol}}R_s))$ | 光域 OSNR（通常以 0.1 nm = 12.5 GHz 为参考带宽）与电域每偏振符号 SNR 互转 |
+
+不同调制格式的理论 BER-SNR 曲线放在一起看最直观：同一 SNR 下阶数越高 BER 越差，同一 BER 目标下阶数越高需要的 SNR 越大——这是频谱效率与所需信噪比之间的基本折中：
+
+![不同调制格式的 BER-SNR 曲线](figures/ber_snr_curves.png)
 
 ---
 
