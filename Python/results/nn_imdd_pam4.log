@@ -1,0 +1,11 @@
+﻿ROP -10 dBm: FFE (LS) 3.1e-02 | Volterra 2.8e-03 | MLP 1.4e-03 | CNN 7.6e-04 | BiLSTM 5.0e-04
+ROP -9 dBm: FFE (LS) 3.0e-02 | Volterra 1.8e-03 | MLP 7.3e-04 | CNN 2.6e-04 | BiLSTM 2.2e-04
+ROP -8 dBm: FFE (LS) 2.9e-02 | Volterra 1.3e-03 | MLP 4.1e-04 | CNN 9.2e-05 | BiLSTM 4.6e-05
+ROP -7 dBm: FFE (LS) 2.8e-02 | Volterra 1.0e-03 | MLP 2.0e-04 | CNN 7.6e-05 | BiLSTM 4.6e-05
+ROP -6 dBm: FFE (LS) 2.7e-02 | Volterra 8.7e-04 | MLP 1.1e-04 | CNN 5.3e-05 | BiLSTM 2.3e-05
+ROP -5 dBm: FFE (LS) 2.7e-02 | Volterra 7.8e-04 | MLP 1.9e-04 | CNN 5.3e-05 | BiLSTM 2.3e-05
+ROP -4 dBm: FFE (LS) 2.6e-02 | Volterra 6.9e-04 | MLP 6.9e-05 | CNN 4.6e-05 | BiLSTM 2.3e-05
+ROP -3 dBm: FFE (LS) 2.6e-02 | Volterra 6.6e-04 | MLP 3.8e-05 | CNN 3.8e-05 | BiLSTM 1.5e-05
+ROP -2 dBm: FFE (LS) 2.6e-02 | Volterra 5.9e-04 | MLP 5.3e-05 | CNN 6.1e-05 | BiLSTM 7.6e-06
+
+每符号实数乘法次数：FFE (LS) 42, Volterra 197, MLP 13504, CNN 78720, BiLSTM 346432

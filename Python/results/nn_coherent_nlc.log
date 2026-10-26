@@ -1,0 +1,6 @@
+﻿P +0 dBm: CDC 20.91 | DBP 1 st/span 21.50 | DBP 10 st/span 22.39 | LDBP 1 st/span 22.11 | LDBP 4 st/span 22.01 | CNN post-eq 20.87  (64 s)
+P +2 dBm: CDC 20.09 | DBP 1 st/span 21.43 | DBP 10 st/span 24.08 | LDBP 1 st/span 23.27 | LDBP 4 st/span 23.52 | CNN post-eq 20.05  (74 s)
+P +4 dBm: CDC 17.49 | DBP 1 st/span 19.53 | DBP 10 st/span 25.62 | LDBP 1 st/span 23.39 | LDBP 4 st/span 24.74 | CNN post-eq 17.46  (93 s)
+P +6 dBm: CDC 13.80 | DBP 1 st/span 16.17 | DBP 10 st/span 26.92 | LDBP 1 st/span 21.67 | LDBP 4 st/span 25.59 | CNN post-eq 13.78  (128 s)
+
+每符号实数乘法次数（近似）：LDBP 1 st/span 6800, LDBP 4 st/span 10560, CNN post-eq 120704, DBP 1 st/span 2320, DBP 10 st/span 23200

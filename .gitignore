@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# MATLAB
+*.asv
+*.mex*
+slprj/
+
+# 数据与大文件（实验数据不入库，Data/ 目录仅保留占位）
+Data/*
+!Data/.gitkeep
+*.mat
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.pt
+*.pth
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
