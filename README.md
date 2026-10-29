@@ -1,14 +1,13 @@
 # Optical Communication System：光纤通信全流程仿真（Python / MATLAB）
 
-面向科研的光纤通信与光纤传感仿真代码，覆盖 **相干 DP-QAM / DP-M-PSK（单信道与 WDM）**、**差分 DPSK/DQPSK（DLI 直接检测）**、**IM-DD PAM2/4/8（MZM / EML / DML，PIN / APD）**、**CO-OFDM**，以及 **光纤传感（OTDR / φ-OTDR-DAS / OFDR / BOTDA / 拉曼 DTS / FBG）** 和 **通信-传感一体化（ISAC）**。
+本项目由香港理工大学光子研究院开发，包含面向科研的光纤通信与光纤传感仿真代码，覆盖 **相干 DP-QAM / DP-M-PSK（单信道与 WDM）**、**差分 DPSK/DQPSK（DLI 直接检测）**、**IM-DD PAM2/4/8（MZM / EML / DML，PIN / APD）**、**CO-OFDM**，以及 **光纤传感（OTDR / φ-OTDR-DAS / OFDR / BOTDA / 拉曼 DTS / FBG）** 和 **通信-传感一体化（ISAC）**。
 
-- **两套实现，一一对应**：Python 与 MATLAB 的模块划分、函数功能和默认参数完全对应，结果可交叉验证。两边自检的物理量完全一致。
-- **一个参数文件**：波段、光纤、放大器参数集中在 `params/fiber_bands.json`，两种语言共用。
+- **双版本代码**：Python 与 MATLAB 的模块划分、函数功能和默认参数完全对应，结果可交叉验证，自检的物理量完全一致。
+- **统一参数文件**：波段、光纤、放大器参数集中在 `params/fiber_bands.json`，两种编程语言共用。
 - **完整非线性模型**：SPM / XPM / FWM / SRS / 自陡峭 / PMD / 色散斜率，另附 GN 模型做解析校验。
-- **神经网络均衡器**：MLP / 1D-CNN / BiLSTM（替代 FFE、Volterra）与学习型 DBP（替代 DBP），均与传统方法在独立测试数据上对比。
+- **神经网络均衡器**：MLP / 1D-CNN / BiLSTM（替代 FFE、Volterra）与学习型 DBP（LDBP, 替代 DBP），均与传统方法在独立测试数据上对比。
 - **常用算法库**：除相干 DSP 链外，还有 PB-NLC、DFE / MLSE、OFDM（Schmidl-Cox、LS 信道估计、CPE）、差分 QAM、规则 LDPC（最小和译码）、NGMI。
 - **光纤传感与通感一体**：六种分布式/点式传感技术的前向模型与解调；两种 ISAC 方案（CP-OFDM 背向散射 DAS、相干收发机前向 SOP/相位传感）。见第 8 节。
-- **代码风格**：简洁、注释直白，不做工程式的参数校验。
 - **配套学习材料**：原理文档 [`docs/仿真原理与DSP算法详解.md`](docs/仿真原理与DSP算法详解.md)（公式推导+伪代码+参考文献）、传感/通感调研 [`docs/光纤传感与通感一体调研.md`](docs/光纤传感与通感一体调研.md)（技术路线、代表工作对比、研究切入点）与交互式教程 [`Python/notebooks/01_相干DP-QAM全流程教程.ipynb`](Python/notebooks/01_相干DP-QAM全流程教程.ipynb)（逐步调用、逐步可视化，已预先运行并嵌入全部图表输出）。
 
 ---
@@ -33,7 +32,7 @@
 
 ## 1. 快速开始
 
-**Python**：使用 conda 环境 `Raymond`，依赖 numpy、scipy、matplotlib。
+**Python**：Python 环境依赖 numpy、scipy、matplotlib。
 ```bash
 cd Python
 conda run -n Raymond python examples/selfcheck.py
@@ -41,7 +40,7 @@ conda run -n Raymond python examples/coherent_dp_qam.py
 conda run -n Raymond python examples/wdm_system.py
 ```
 
-神经网络均衡器另需 PyTorch（Raymond 环境已有 torch 2.12 + CUDA）；有 GPU 时自动使用，可用环境变量 `OPTSIM_DEVICE=cpu` 强制 CPU。
+神经网络均衡器另需 PyTorch，可用环境变量 `OPTSIM_DEVICE=cpu` 强制 CPU。
 
 **MATLAB**：在 R2026a 上测试。需要 Signal Processing Toolbox（`besself`、`hilbert`、`pwelch`、`medfilt1`）；Statistics Toolbox 仅 `pcs_mb` 用到（`randsample`）；神经网络均衡器需要 Deep Learning Toolbox（`trainnet`、`dlarray`；有 GPU 与 Parallel Computing Toolbox 时自动用 GPU）。
 ```matlab
@@ -51,7 +50,7 @@ main_coherent_dp_qam
 main_wdm_system
 ```
 
-**最小调用示例**（Python；MATLAB 的写法完全对应）：
+**最小调用示例：**
 ```python
 from optsim import devices as dev, channel
 from optsim.system import Config, tx_signal, rx_dsp
@@ -139,7 +138,7 @@ SSMF 各波段中心波长处的参数（`band_table('SSMF')`）：
 - Python：`fiber_params('S', 'ULL', L=100, pmd=0, raman=True)`
 - MATLAB：`fiber_params('S', 'ULL', 'L', 100, 'pmd', 0, 'raman', true)`
 - 在系统级使用时，`Config(band=..., fiber=..., fib_kw={...})` 或 `sys_config('band', ..., 'fib_kw', {...})` 会自动生成 `cfg.fib`。
-- 要添加新光纤或新波段，在 JSON 里加一项即可，不用改代码。
+- 要添加新光纤或新波段，在 JSON 里加一项即可。
 
 ---
 
@@ -154,7 +153,7 @@ SSMF 各波段中心波长处的参数（`band_table('SSMF')`）：
 | 循环仿真 | 色散、滤波、时延、重采样（FFT 方式）都是循环运算。激光相位噪声取 Brownian bridge，频偏取整到频率网格，保证首尾连续。<br>例外是相位跟踪（BPS / VV / 导频 / 周跳消除）。它们的滑动平均**不循环**：FO 补偿后残余频偏使相位不再周期，若首尾相接，记录末尾几个符号会出错 |
 | 采样率 | 单信道 4 sps；WDM 的仿真带宽需覆盖全部信道（如 32 GBd × 16 sps = 512 GHz，可容纳 7×50 GHz） |
 | 相干输出 | 相干接收输出 ∝ R·E_s·E_LO*：LO 频偏 +Δf 时，信号呈现 −Δf 频偏 |
-| 帧结构 | [训练 2048 | 每 32 符号 1 个导频]，`kind` 数组标记 0 数据 / 1 训练 / 2 导频 |
+| 帧结构 | [训练 2048 每 32 符号 1 个导频]，`kind` 数组标记 0 数据 / 1 训练 / 2 导频 |
 
 ---
 
@@ -367,7 +366,7 @@ DBP 的乘法数按分块 FFT（N = 4096）估算，与 LDBP 同口径。MATLAB 
 - **数据量**：黑盒 NN 每次训练用约 6.5 万符号；数据太少会欠拟合或过拟合，看验证集 MSE 曲线判断。
 - **每个工作点单独训练**（ROP、入纤功率）是常见做法。跨工作点泛化需要混合训练数据。
 - **复杂度比 BER 更重要**：NN 的增益要与乘法数一起报告。IM-DD 中 MLP 约为 Volterra 的 70 倍。
-- **GPU**：几十秒内即可完成训练；CPU 也能跑，只是较慢。本机实测：**不要让 Python（torch）与 MATLAB 的 GPU 任务同时运行**，否则 torch 初始化 CUDA 可能崩溃（access violation）。若 CUDA 初始化异常，可设 `OPTSIM_DEVICE=cpu`。
+- **GPU**：几十秒内即可完成训练；CPU 也能跑，只是较慢。**不要让 Python（torch）与 MATLAB 的 GPU 任务同时运行**，否则 torch 初始化 CUDA 可能崩溃（access violation）。若 CUDA 初始化异常，可设 `OPTSIM_DEVICE=cpu`。
 
 ---
 
@@ -487,7 +486,7 @@ Python 函数位于 `optsim.<模块>`，MATLAB 为同名或近名函数文件。
 
 ## 10. 示例与参考结果
 
-所有结果均在本机实际运行得到，Python 与 MATLAB 一致（差异来自随机数）。
+注意：数值差异仅来自随机数。
 
 | 脚本（Python / MATLAB） | 内容 | 参考结果 |
 |---|---|---|
@@ -564,25 +563,6 @@ Python 函数位于 `optsim.<模块>`，MATLAB 为同名或近名函数文件。
 - **新器件**：照 `devices.py` / `Components/` 写一个函数，输入输出都是光场（2×N），即可插入链路。
 - **EGN、ISRS-GN**：在 `gn_eta` 中加修正项。
 - **新的传感 / 通感方案**：前向模型用 `rayleigh_fiber` + `backscatter`（瑞利类）或 `botda`（布里渊），接收用 `laser`、`hybrid_90`、`bpd`，解调可复用 `das_phase`、`pulse_compress`、`ofdm_profile`、`jones_est`。
-
----
-
-## 12. 与参考代码的关系
-
-`Long Haul Transmission Experiment Data/Process_Codes` **未作任何修改**。本项目参考其思路重写并推广了以下函数：
-
-| 参考代码 | 本项目 | 主要变化 |
-|---|---|---|
-| `IQimbalance` | `gsop` | — |
-| `FiberDispComp` | `cdc` | 增加 β3 |
-| `DBP_Raymond` | `dbp` | 同为 Manakov 8/9、对称 SSFM、逐跨撤销增益；改用参数文件 |
-| `Train_LMS_RDE_2by2` / `LMS_DD` | `mimo_eq` | 统一为多模式 |
-| `FreOffsetEst` | `foe` | — |
-| `BPS_DualPol` | `cpr_bps` | 改为滑动窗 + 解卷绕 |
-| `PilotBased_CPE` | `cpr_pilot` | 增加插值 |
-| `Synchronization_*_abs` | `frame_sync` | — |
-| `SNR_eval` / `EVM_eval` | `calc_snr` / `calc_evm` | — |
-| `SymbolMappingAndFraming` / `RemovePilotSymbols` | `framing` + `kind` 标记 | — |
 
 ---
 
