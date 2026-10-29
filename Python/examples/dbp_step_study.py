@@ -9,7 +9,7 @@ DSP ：CDC 或 DBP（每跨 5/10/20/100 步，即步长 20/10/5/1 km）-> 匹配
 前向光纤用单精度、均匀 100 m 步长的对称 SSFM（比最细的 DBP 步长 1 km 再细 10 倍，作为"真实信道"），
 不计 PMD / SRS / 自陡峭，使 DBP 能补偿的确定性 Kerr 效应成为唯一的非线性损伤。
 
-运行（Raymond 环境，项目 Python/ 目录下）：
+运行（在项目 Python/ 目录下）：
     python examples/dbp_step_study.py --workers 14 (数据默认写到项目 Data/DP16QAM_40GBd_DBP_step)
     python examples/dbp_step_study.py --quick          # 只跑 1 个点试跑，检查耗时
 输出：每个 (距离, 功率, 种子) 一个 rx_*.npz（示波器波形），每个种子一个 tx_*.npz（AWG 波形、帧、比特），

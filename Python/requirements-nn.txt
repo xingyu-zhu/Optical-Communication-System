@@ -1,0 +1,5 @@
+# 可选：神经网络均衡 / LDBP 示例（examples/nn_*.py，optsim/nn_eq.py）
+# CPU 版：pip install -r requirements-nn.txt
+# GPU 版：先按 https://pytorch.org/get-started/locally/ 选择与本机 CUDA 驱动匹配的安装命令，再安装其余依赖
+-r requirements.txt
+torch>=2.0

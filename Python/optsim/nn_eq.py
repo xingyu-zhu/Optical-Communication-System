@@ -30,7 +30,7 @@ from .dsp import sym_windows
 
 def default_device():
     """计算设备：环境变量 OPTSIM_DEVICE（'cpu' / 'cuda'）优先，否则自动检测 CUDA。
-    注意：本机实测，若另一进程（如 MATLAB GPU 训练）正在使用 CUDA，torch 初始化 CUDA 可能崩溃（access violation）；
+    注意：实测在部分 Windows + CUDA 环境下，若另一进程（如 MATLAB GPU 训练）正在使用 CUDA，torch 初始化 CUDA 可能崩溃（access violation）；
     此时请等待其结束，或设置 OPTSIM_DEVICE=cpu。"""
     return os.environ.get('OPTSIM_DEVICE') or ('cuda' if torch.cuda.is_available() else 'cpu')
 

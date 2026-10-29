@@ -32,15 +32,16 @@
 
 ## 1. 快速开始
 
-**Python**：Python 环境依赖 numpy、scipy、matplotlib。
+**Python**（≥ 3.9，任意平台；系统 Python、venv、conda 环境均可）：依赖见 `Python/requirements.txt`（numpy、scipy、matplotlib，教程另需 pandas、pillow、Jupyter）。
 ```bash
 cd Python
-conda run -n Raymond python examples/selfcheck.py
-conda run -n Raymond python examples/coherent_dp_qam.py
-conda run -n Raymond python examples/wdm_system.py
+pip install -r requirements.txt        # 一键安装依赖（建议先建虚拟环境：python -m venv .venv）
+python examples/selfcheck.py
+python examples/coherent_dp_qam.py
+python examples/wdm_system.py
 ```
 
-神经网络均衡器另需 PyTorch，可用环境变量 `OPTSIM_DEVICE=cpu` 强制 CPU。
+神经网络均衡器另需 PyTorch：`pip install -r requirements-nn.txt`（GPU 版按 pytorch.org 选择对应 CUDA 的安装命令）；可用环境变量 `OPTSIM_DEVICE=cpu` 强制 CPU。
 
 **MATLAB**：在 R2026a 上测试。需要 Signal Processing Toolbox（`besself`、`hilbert`、`pwelch`、`medfilt1`）；Statistics Toolbox 仅 `pcs_mb` 用到（`randsample`）；神经网络均衡器需要 Deep Learning Toolbox（`trainnet`、`dlarray`；有 GPU 与 Parallel Computing Toolbox 时自动用 GPU）。
 ```matlab
@@ -76,6 +77,7 @@ Optical Communication System/
 │   ├── 仿真原理与DSP算法详解.md     原理文档：仿真每一级的物理模型 + 接收 DSP 算法链详解，含公式、伪代码、参考文献
 │   └── 光纤传感与通感一体调研.md     传感 / ISAC 调研：技术路线、代表工作对比、现存问题、研究切入点
 ├── Python/
+│   ├── requirements.txt          依赖清单（pip install -r requirements.txt）；requirements-nn.txt 另加 PyTorch
 │   ├── notebooks/
 │   │   └── 01_相干DP-QAM全流程教程.ipynb   配套交互式教程：逐步调用 optsim 函数，分步可视化每个 DSP 模块的效果
 │   ├── optsim/

@@ -1,0 +1,15 @@
+# optsim 光通信仿真包与示例的 Python 依赖（Python >= 3.9）
+# 安装：在本目录执行  pip install -r requirements.txt
+# 神经网络均衡示例另需 PyTorch，见 requirements-nn.txt
+
+# ---- 仿真核心（optsim 包与 examples/ 脚本）----
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+
+# ---- 教程 notebook（notebooks/）----
+pandas>=1.5          # 表格展示
+pillow>=9.0          # 保存 GIF 动图
+ipython>=8.0
+ipykernel>=6.0
+jupyterlab>=4.0      # 或经典 notebook；已有 Jupyter / VS Code 环境可删去此行
