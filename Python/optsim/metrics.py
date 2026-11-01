@@ -19,6 +19,15 @@ def ser(tx_sym, rx_sym, const):
     return np.mean(decide(tx_sym, const) != decide(rx_sym, const))
 
 
+def moments(const, prior=None):
+    """星座归一化高阶矩 (μ4, μ6) = (E|x|⁴/(E|x|²)², E|x|⁶/(E|x|²)³)。
+    决定非线性干扰对调制格式的依赖（EGN 模型的修正项含 μ4−2 与 μ6）：QPSK (1, 1)，16QAM (1.32, 1.96)，
+    64QAM (1.381, 2.226)，复高斯 (2, 6)；μ4 越接近 2（高阶 QAM、概率整形），NLI 越接近 GN 模型的预测（越大）。"""
+    p = np.ones(len(const)) / len(const) if prior is None else np.asarray(prior)
+    m2 = np.sum(p * np.abs(const) ** 2)
+    return np.sum(p * np.abs(const) ** 4) / m2 ** 2, np.sum(p * np.abs(const) ** 6) / m2 ** 3
+
+
 def evm(rx, tx):
     """rms EVM [%] = sqrt(E|rx-tx|² / E|tx|²)。"""
     return 100 * np.sqrt(np.mean(np.abs(rx - tx) ** 2) / np.mean(np.abs(tx) ** 2))
