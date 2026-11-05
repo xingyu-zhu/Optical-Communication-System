@@ -10,10 +10,11 @@ channel  色散、Manakov SSFM（SPM/XPM/FWM/SRS/自陡峭/PMD）、多跨链路
 dsp      接收 DSP 算法库（相干、IM-DD、OFDM、PB-NLC）
 metrics  BER/SNR/EVM/GMI/NGMI/MI 等
 fec      规则 LDPC 编码与最小和译码
+filecodec 文件编解码：任意文件 -> 封装/LDPC/加扰/成帧（tx_signal 格式），接收端还原文件并校验 CRC32
 sensing  光纤传感：OTDR、φ-OTDR/DAS、OFDR、BOTDA、拉曼 DTS、FBG
 isac     通感一体：CP-OFDM 背向散射测距剖面、前向 Jones/SOP/相位传感
 system   Config、tx_signal、wdm_tx/wdm_rx、rx_dsp
 plots    星座图、功率谱、眼图
 nn_eq    神经网络均衡器 NNEqualizer（MLP/CNN/BiLSTM）与学习型 DBP（需 torch，按需导入：from optsim.nn_eq import ...）
 """
-from . import utils, params, tx, devices, channel, dsp, metrics, fec, sensing, isac
+from . import utils, params, tx, devices, channel, dsp, metrics, fec, filecodec, sensing, isac

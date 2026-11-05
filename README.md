@@ -89,6 +89,7 @@ Optical Communication System/
 │   │   ├── dsp.py        接收 DSP 算法库（相干链、PB-NLC、FFE/DFE/Volterra/MLSE、OFDM、KK）
 │   │   ├── metrics.py    BER/SER/EVM/SNR/Q/GMI/NGMI/MI、理论 BER、OSNR↔SNR
 │   │   ├── fec.py        规则 LDPC：构造、系统编码、归一化最小和译码
+│   │   ├── filecodec.py  文件编解码：任意文件 → 封装/LDPC/加扰/成帧（tx_signal 格式）→ 接收端还原文件并校验 CRC32
 │   │   ├── sensing.py    光纤传感：OTDR、φ-OTDR/DAS、LFM 脉冲压缩、OFDR、BOTDA、拉曼 DTS、FBG
 │   │   ├── isac.py       通感一体：CP-OFDM 背向散射距离剖面、Jones/SOP/相位估计
 │   │   ├── system.py     Config、tx_signal、wdm_tx、wdm_rx、rx_dsp
@@ -292,6 +293,7 @@ SSMF 各波段中心波长处的参数（`band_table('SSMF')`）：
 | OFDM | 加/去 CP + (I)FFT；Schmidl-Cox 定时与频偏；多训练符号 LS 信道估计（先对齐公共相位再平均）+ 导频 CPE | `tx.ofdm_mod`/`ofdm_mod`, `ofdm_demod`, `schmidl_cox`, `ofdm_eq` | nfft, ncp, 训练符号数 |
 | 差分 QAM | 象限差分 + 象限内 Gray，对 π/2 模糊与周跳免疫（M=4 即 DQPSK） | `tx.diff_qam`/`diff_qam`, `diff_qam_demod` | — |
 | 信道编码 | 规则 (dv, dc) LDPC：Gallager 构造 + GF(2) 消元系统编码 + 归一化最小和译码 | `fec.ldpc_make/encode/decode`, `ldpc_make/encode/decode` | n, dv, dc, 迭代次数 |
+| 文件还原 | 训练/导频估计噪声方差 → 逐比特 LLR → 解扰 → LDPC 译码 → CRC32 校验（仅 Python） | `filecodec.decode_file` | iters |
 
 性能指标：`ber`、`ser`、`evm`、`snr`（最小二乘复增益后的有效 SNR）、`q_factor`、`ber_theory`、`gmi`、`ngmi`/`calc_ngmi`、`mi`、`osnr2snr`、`snr2osnr`。
 
@@ -479,6 +481,7 @@ Python 函数位于 `optsim.<模块>`，MATLAB 为同名或近名函数文件。
 | PB-NLC | `dsp.pb_nlc(y, ref, n_train, L)` | `pb_nlc` |
 | DFE / MLSE | `dsp.dfe(x, ref, nf, nb, mu, sps, n_train, levels)`, `dsp.ch_est(x, ref, ntaps)`, `dsp.mlse(x, h, levels)` | `dfe_lms`, `ch_est`, `mlse_viterbi` |
 | LDPC | `fec.ldpc_make(n, dv, dc)`, `fec.ldpc_encode(u, code)`, `fec.ldpc_decode(llr, code)` | `ldpc_make`, `ldpc_encode`, `ldpc_decode` |
+| 文件编解码 | `filecodec.file_tx_signal(path, cfg, fec_kind)`, `filecodec.decode_file(y, ref, out_dir)`, `pack_file`, `unpack_file` | —（仅 Python） |
 | NGMI | `metrics.ngmi(rx, tx, const)` | `calc_ngmi` |
 | 瑞利传感 | `sensing.cell_len`, `rayleigh_fiber`, `backscatter`, `lfm`, `pulse_compress`, `ddc`, `das_phase`, `vib_locate`, `otdr_trace`, `otdr_events`, `ofdr_scan`, `ofdr_shift` | 同名（`lfm` → `lfm_pulse`；常数见 `sens_const`） |
 | 布里渊 / 拉曼 / FBG | `sensing.bfs`, `brillouin_gain`, `botda`, `bfs_fit`, `raman_ratio`, `dts_temp`, `fbg_reflect`, `fbg_shift`, `fbg_peak` | `bfs_shift`, `brillouin_gain`, `botda_bgs`, `bfs_fit`, 其余同名 |
@@ -565,6 +568,27 @@ Python 函数位于 `optsim.<模块>`，MATLAB 为同名或近名函数文件。
 - **新器件**：照 `devices.py` / `Components/` 写一个函数，输入输出都是光场（2×N），即可插入链路。
 - **EGN、ISRS-GN**：在 `gn_eta` 中加修正项。
 - **新的传感 / 通感方案**：前向模型用 `rayleigh_fiber` + `backscatter`（瑞利类）或 `botda`（布里渊），接收用 `laser`、`hybrid_90`、`bpd`，解调可复用 `das_phase`、`pulse_compress`、`ofdm_profile`、`jones_est`。
+
+**Q6：如何把一个真实文件（文本、图片等）调制到光信号上，传输后再还原？**
+用 `optsim/filecodec.py`。`file_tx_signal` 的返回值与 `tx_signal` 格式相同，所以只需在任一相干示例（如 `coherent_dp_qam.py`）里替换发射这一行，器件、链路和 `rx_dsp` 都不用改：
+```python
+from optsim import filecodec
+ref = filecodec.file_tx_signal('photo.png', cfg, fec_kind='ldpc34')   # 代替 ref = tx_signal(cfg)
+# ... DAC / 激光器 / DP-IQ 调制器 / 链路 / 相干接收机 / ADC，与原示例相同 ...
+res = rx_dsp(r, cfg, ref)
+out = filecodec.decode_file(res['y'], ref, out_dir='results')         # 写出 results/rx_photo.png
+print(out['crc_ok'], out['ber_pre'], out['n_fail'])                   # CRC 是否通过、纠错前 BER、未收敛码字数
+```
+处理流程：
+- 发射端：文件封装为“文件头（魔数、版本、文件名、长度、CRC32）+ 内容”→ 比特 → LDPC 编码（`ldpc34` 码率 3/4、`ldpc12` 码率 1/2、`none`，码长 1944）→ 固定种子加扰（使星座点等概率）→ Gray QAM（比特流前半送 X 偏振、后半送 Y 偏振）→ 成帧 → RRC 成形。
+- 接收端：用训练序列和导频估计每偏振噪声方差，计算软信息 LLR，解扰后做 LDPC 译码，再按 CRC32 判断文件是否完好。
+- 小文件会用伪随机比特填充到每偏振至少 2¹⁴ 个数据符号，保证 MIMO 均衡有足够的收敛长度。
+
+实测（`seed=1`，40 GBd，链路同 `coherent_dp_qam.py`）：49.5 kB 的 README 经 10×80 km、1 dBm 传输，纠错前 BER 2.7e‑5，还原文件与原文件逐字节一致（约 1.5 min）；44.5 kB 的 PNG 以 DP-64QAM 背靠背、OSNR 26 dB 发送，纠错前 BER 2.3e‑2，LDPC 3/4 后逐字节一致；OSNR 12 dB 时 LDPC 无法收敛，`crc_ok=False`。
+
+注意：
+- `rx_dsp` 的帧同步（`dsp.sync`）用整帧发送符号做相关，含数据段，因此不是严格的盲接收；LLR、解扰和译码本身只用训练序列、导频和协议参数（种子、码字数）。
+- 耗时与内存随文件大小线性增长，主要耗在 SSFM；大文件建议先用背靠背（`n_spans=0`、`dev.set_osnr`）验证。
 
 ---
 
