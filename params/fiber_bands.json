@@ -18,10 +18,35 @@
     "SSMF":  {"itu": "G.652.D", "lambda0_nm": 1312, "S0": 0.090, "aeff_um2": 80,  "aeff_exp": 1.0, "n2": 2.6e-20, "pmd": 0.05, "alpha_offset_db_km": 0.00, "_note": "标准单模光纤，D(1550) ≈ 17"},
     "ULL":   {"itu": "G.654.E", "lambda0_nm": 1300, "S0": 0.107, "aeff_um2": 125, "aeff_exp": 1.0, "n2": 2.2e-20, "pmd": 0.04, "alpha_offset_db_km": -0.04, "_note": "超低损耗大有效面积纯硅芯光纤，D(1550) ≈ 21"},
     "NZDSF": {"itu": "G.655",   "lambda0_nm": 1450, "S0": 0.060, "aeff_um2": 72,  "aeff_exp": 1.0, "n2": 2.6e-20, "pmd": 0.04, "alpha_offset_db_km": 0.01, "_note": "非零色散位移光纤，D(1550) ≈ 5"},
-    "DSF":   {"itu": "G.653",   "lambda0_nm": 1550, "S0": 0.085, "aeff_um2": 50,  "aeff_exp": 1.0, "n2": 2.6e-20, "pmd": 0.05, "alpha_offset_db_km": 0.02, "_note": "色散位移光纤，C 波段 D ≈ 0，WDM 下 FWM 严重"}
+    "DSF":   {"itu": "G.653",   "lambda0_nm": 1550, "S0": 0.085, "aeff_um2": 50,  "aeff_exp": 1.0, "n2": 2.6e-20, "pmd": 0.05, "alpha_offset_db_km": 0.02, "_note": "色散位移光纤，C 波段 D ≈ 0，WDM 下 FWM 严重"},
+    "HCF":   {"itu": "—", "medium": "air", "alpha_db_km": 0.11, "D1550": 2.5, "S1550": 0.007, "aeff_um2": 500, "aeff_exp": 0.0, "n2": 3.0e-23, "pmd": 0.02, "ng": 1.0003, "alpha_offset_db_km": 0.0,
+              "_note": "反谐振空芯光纤（DNANF 型）典型值：光在空气中传播，n2 为含少量玻璃交叠的等效值（γ 约为 SSMF 的 1/5000），群折射率≈1（时延约 3.34 µs/km，比石英光纤低约 32%）；衰减取绝对值 alpha_db_km（不叠加石英波段衰减），色散用线性模型 D(λ) = D1550 + S1550·(λ−1550)；空气中无石英拉曼响应。各参数随具体光纤设计变化，仅作典型值（待核实）"}
   },
+
+  "_fiber_optional_keys": "可选字段：alpha_db_km 绝对衰减（覆盖 波段衰减+修正）；D1550/S1550 线性色散模型（覆盖 Sellmeier）；ng 群折射率（默认 1.468）；medium 'air' 时不计石英拉曼（fR = 0）",
 
   "raman": {"fR": 0.18, "tau1_fs": 12.2, "tau2_fs": 32.0, "_note": "石英 Raman 响应 h_R(t) = (τ1²+τ2²)/(τ1τ2²)·exp(-t/τ2)·sin(t/τ1)，峰值增益频移约 13.2 THz"},
 
-  "wdm": {"spacing_ghz": 50, "_note": "默认 WDM 栅格（ITU-T G.694.1 灵活栅格可设 37.5/50/75/100 GHz）"}
+  "wdm": {"spacing_ghz": 50, "_note": "默认 WDM 栅格（ITU-T G.694.1 灵活栅格可设 37.5/50/75/100 GHz）"},
+
+  "multimode": {
+    "_note": "少模光纤（FMF，相干 SDM）与多模光纤（MMF，850 nm IM-DD）参数，供 multimode 模块 / mm_params 使用。均为典型值，随具体光纤设计变化（待核实）",
+    "_fmf_keys": "modes 空间模式名；groups 每个空间模式所属模式群；hg 每个空间模式对应的 Hermite-Gauss 阶数 [m, n]（抛物线近似模场，用于非线性交叠积分）；w0_um 基模模场半径；alpha_db_km 平均衰减；mdl_db_km 各模式群附加衰减；D/S 各模式群色散与斜率；dmgd_ps_km 各模式群相对 LP01 的群时延差；regime 'strong'（全部模式随机强耦合）| 'weak'（只在简并模式群内强耦合，群间按 xt_db_km 弱耦合）；lc_km 耦合段长度；nf_db / mdg_db 少模 EDFA 噪声系数与各模式群增益差",
+    "_mmf_keys": "core_um 纤芯直径；na 数值孔径；n1 纤芯折射率；ng 群折射率；lambda0_nm/S0 色散 Sellmeier 参数（同单模光纤）；alpha_profile_offset 折射率剖面指数相对最优值 α_opt 的偏差（决定模式带宽）；emb_nominal_mhz_km 标准规定的有效模式带宽，仅作对照",
+    "FMF3": {"type": "FMF", "lam_nm": 1550, "modes": ["LP01", "LP11a", "LP11b"], "groups": [1, 2, 2], "hg": [[0, 0], [1, 0], [0, 1]],
+             "w0_um": 6.0, "n2": 2.6e-20, "alpha_db_km": 0.20, "mdl_db_km": [0.0, 0.01], "D": [20.0, 20.5], "S": [0.060, 0.062],
+             "dmgd_ps_km": [0.0, 50.0], "regime": "strong", "lc_km": 1.0, "xt_db_km": -30.0, "nf_db": 5.5, "mdg_db": [0.0, 0.3], "ng": 1.468,
+             "_note": "3 模（LP01 + LP11a/b，6 个空间-偏振通道）低 DMGD 渐变折射率 FMF"},
+    "FMF6": {"type": "FMF", "lam_nm": 1550, "modes": ["LP01", "LP11a", "LP11b", "LP21a", "LP21b", "LP02"], "groups": [1, 2, 2, 3, 3, 3],
+             "hg": [[0, 0], [1, 0], [0, 1], [2, 0], [1, 1], [0, 2]],
+             "w0_um": 7.0, "n2": 2.6e-20, "alpha_db_km": 0.21, "mdl_db_km": [0.0, 0.01, 0.02], "D": [20.0, 20.5, 21.0], "S": [0.060, 0.062, 0.064],
+             "dmgd_ps_km": [0.0, 60.0, 120.0], "regime": "weak", "lc_km": 1.0, "xt_db_km": -30.0, "nf_db": 6.0, "mdg_db": [0.0, 0.3, 0.6], "ng": 1.468,
+             "_note": "6 模（3 个模式群，12 个空间-偏振通道）渐变折射率 FMF；第 3 群 LP21a/b 与 LP02 在抛物线近似下简并"},
+    "OM3":  {"type": "MMF", "lam_nm": 850, "core_um": 50.0, "na": 0.200, "n1": 1.466, "ng": 1.487, "alpha_db_km": 2.5,
+             "lambda0_nm": 1316, "S0": 0.101, "alpha_profile_offset": 0.030, "emb_nominal_mhz_km": 2000,
+             "_note": "50 µm 渐变折射率多模光纤（OM3 级），850 nm；alpha_profile_offset 按满注入 EMB ≈ 2000 MHz·km 标定（模型值）"},
+    "OM4":  {"type": "MMF", "lam_nm": 850, "core_um": 50.0, "na": 0.200, "n1": 1.466, "ng": 1.487, "alpha_db_km": 2.5,
+             "lambda0_nm": 1316, "S0": 0.101, "alpha_profile_offset": 0.015, "emb_nominal_mhz_km": 4700,
+             "_note": "50 µm 渐变折射率多模光纤（OM4 级），850 nm；alpha_profile_offset 按满注入 EMB ≈ 4700 MHz·km 标定（模型值）"}
+  }
 }

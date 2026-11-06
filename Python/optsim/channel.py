@@ -1,4 +1,4 @@
-"""光纤信道：色散、损耗、Kerr 非线性（SPM/XPM/FWM）、受激拉曼散射 (SRS)、自陡峭、PMD、多跨链路、GN 模型。
+"""光纤信道：色散、损耗、Kerr 非线性（SPM/XPM/FWM）、受激拉曼散射 (SRS)、自陡峭、PMD、多跨链路、GN 模型、空芯光纤模间干扰 (imi)。
 
 场约定（工程约定）：E(t)·exp(+jω0 t)，基带正频率 = 更高光频（更短波长）。
 光纤参数统一用 dict `fib`（由 params.fiber_params 生成），字段与单位：
@@ -119,6 +119,24 @@ def link(E, fs, fib, n_spans, ase=True, rng=None, **ssfm_kw):
         E = ssfm(E, fs, fib, rng=rng, **ssfm_kw)
         E = edfa(E, fs, gain_db=G, nf_db=fib['nf'], f0=fib['f0'], rng=rng) if ase else E * 10 ** (G / 20)
     return E
+
+
+def imi(E, fs, imi_db, tau_max, n_paths=64, rng=None):
+    """空芯光纤模间干扰（IMI, intermodal interference）：基模沿光纤分布式耦合到高阶模（如 LP11），
+    以不同群速度传播后再耦合回基模，在接收端表现为一串弱的、随机相位的延迟回波。
+
+    模型：E_out = √(1-η)·E + Σ_k √(η/K)·e^{jφ_k}·E(t - τ_k)，τ_k ~ U(0, tau_max)，φ_k ~ U(0, 2π)
+    参数: imi_db 总 IMI 功率比 10lg η [dB]（如 -50；随长度和高阶模抑制比变化）;
+          tau_max 最大差分群时延 [s] = 高阶模与基模的 DMGD [s/m] × 长度;
+          n_paths 离散回波数 K（近似分布式耦合）
+    """
+    rng = np.random.default_rng(rng)
+    eta = 10 ** (imi_db / 10)
+    w = 2 * np.pi * freq(np.shape(E)[-1], fs)
+    tau = rng.uniform(0, tau_max, n_paths)
+    ph = rng.uniform(0, 2 * np.pi, n_paths)
+    h = np.sqrt(1 - eta) + np.sqrt(eta / n_paths) * np.sum(np.exp(1j * ph[:, None] - 1j * w[None] * tau[:, None]), 0)
+    return fft_filter(E, h)
 
 
 # ======================= GN 模型（非线性干扰解析估计） =======================

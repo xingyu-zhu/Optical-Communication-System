@@ -17,4 +17,4 @@ system   Config、tx_signal、wdm_tx/wdm_rx、rx_dsp
 plots    星座图、功率谱、眼图
 nn_eq    神经网络均衡器 NNEqualizer（MLP/CNN/BiLSTM）与学习型 DBP（需 torch，按需导入：from optsim.nn_eq import ...）
 """
-from . import utils, params, tx, devices, channel, dsp, metrics, fec, filecodec, sensing, isac
+from . import utils, params, tx, devices, channel, dsp, metrics, fec, filecodec, multimode, sensing, isac

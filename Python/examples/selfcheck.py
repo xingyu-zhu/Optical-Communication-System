@@ -171,3 +171,60 @@ rq = awgn(sq, 3, rng=rng)
 bh, ok = fec.ldpc_decode(tx.llr(rq, q4, 10 ** -0.3).reshape(len(u), -1), code)
 pre, post = np.mean(tx.demodulate(rq, q4) != cw.ravel()), np.mean(bh[:, code['free']] != u)
 report('LDPC NMS decoding', post < 1e-4 < pre, f'pre-FEC {pre:.2e} -> post-FEC {post:.1e}, NGMI {metrics.ngmi(rq, sq, q4):.3f}, rate {code["k"] / 1944:.3f}')
+
+print('---- Hollow-core / few-mode / multimode fiber ----')
+from optsim import multimode as mm
+# 18) 空芯光纤：SPM 相移 = γPLeff（线性色散模型 + medium=air 时 fR=0 的 RK4 路径）、时延比与 IMI 功率
+hcf = fiber_params('C', 'HCF', pmd=0, raman=True)
+P0h = 1.0
+Eh = channel.ssfm(np.sqrt(P0h) * np.ones(1024), 100e9, hcf, nsteps=50)
+ah = hcf['alpha'] * np.log(10) / 10
+ph_h = hcf['gamma'] * P0h * (1 - np.exp(-ah * hcf['L'])) / ah
+Ei = normalize(rng.standard_normal(2 ** 14) + 1j * rng.standard_normal(2 ** 14))
+eta = np.mean(np.abs(channel.imi(Ei, 64e9, -30, 50e-9, rng=rng) - np.sqrt(1 - 1e-3) * Ei) ** 2)
+report('HCF SPM / latency / IMI', abs(-np.angle(Eh[0, 0]) / ph_h - 1) < 1e-3 and abs(eta / 1e-3 - 1) < 0.1,
+       f"φ {-np.angle(Eh[0, 0]):.2e} vs γPLeff {ph_h:.2e} rad, latency {hcf['latency']:.3f} vs SSMF {fib['latency']:.3f} µs/km, IMI {10 * np.log10(eta):.1f} dB (set -30)")
+
+# 19) 多模 Kerr 系数：单模退化为 Manakov 8/9；强耦合 FMF 中 CW 的非线性相移 = Γ·P_tot·L（与随机耦合对易）
+w = 6e-6
+k1 = mm.kerr_coeffs(mm.overlap(np.array([[0, 0]]), w), [0, 0])[0][0, 0] * np.pi * w ** 2
+q = mm.mm_params('FMF3', L=20, alpha_db_km=0, mdl_db_km=[0, 0], mdg_db=[0, 0], dmgd_ps_km=[0, 0], D=[0, 0], S=[0, 0])
+Ec = np.ones((6, 256)) * np.sqrt(0.05 / 6) * np.exp(2j * np.pi * rng.random((6, 1)))
+Hq = mm.mm_transfer(64e9, 256, q, 1, rng=3)[0]
+Gm = mm.nl_matrix(q)[1][0, 0]
+dev_nl = np.max(np.abs(mm.ssfm_mm(Ec, 64e9, q, rng=3) - Hq @ Ec * np.exp(-1j * Gm * 0.05 * 20e3))) / np.sqrt(0.05 / 6)
+report('Multimode Kerr coefficient', abs(k1 - 8 / 9) < 1e-6 and dev_nl < 1e-3, f'κ·Aeff {k1:.6f} (8/9), FMF3 CW phase error {dev_nl:.1e}')
+
+# 20) 随机模式耦合：无损时 H 酉；mm_link（线性、无 ASE）与 mm_transfer 逐点一致
+q = mm.mm_params('FMF3', L=30)
+Hu = mm.mm_transfer(64e9, 512, mm.mm_params('FMF3', L=30, alpha_db_km=0, mdl_db_km=[0, 0], mdg_db=[0, 0]), 1, rng=1)
+uerr = np.max(np.abs(Hu @ np.conj(np.swapaxes(Hu, 1, 2)) - np.eye(6)))
+Ex = rng.standard_normal((6, 2048)) + 1j * rng.standard_normal((6, 2048))
+E1 = mm.mm_link(Ex, 64e9, q, 2, ase=False, rng=5, nonlinear=False)
+E2 = np.fft.ifft(np.einsum('nij,jn->in', mm.mm_transfer(64e9, 2048, q, 2, rng=5), np.fft.fft(Ex, axis=1)), axis=1)
+lerr = np.linalg.norm(E1 - E2) / np.linalg.norm(E2)
+report('Mode coupling / transfer', uerr < 1e-12 and lerr < 1e-10, f'|HH^H - I| {uerr:.1e}, link vs transfer {lerr:.1e}')
+
+# 21) 群时延扩展：强耦合 ∝ √L（10 → 40 km 约 2 倍），弱耦合 ≈ 不耦合值 DMGD·L·√(2/9)
+gstd = lambda reg, L: np.mean([np.mean(np.std(mm.group_delays(mm.mm_transfer(
+    64e9, 4096, mm.mm_params('FMF3', L=L, regime=reg), 1, rng=s), 64e9), 1)) for s in range(6)])
+r_s = gstd('strong', 40) / gstd('strong', 10)
+r_w = gstd('weak', 10) / (50e-12 * 10 * np.sqrt(2 / 9))
+report('GD spread strong / weak', abs(r_s - 2) < 0.3 and abs(r_w - 1) < 0.1, f'strong 40/10 km ratio {r_s:.2f} (√4 = 2), weak / uncoupled {r_w:.3f}')
+
+# 22) MMF 激励：模场失配高斯光斑 P_2k = (1-r²)·C(2k,k)/4^k·r^{2k}（2D 合并后 P_N = (1-r²)·r^N，N 偶），
+#     横向偏移 d 的匹配光斑 P_1 = e^{-(d/w0)²}（泊松分布，均值 (d/w0)²）
+om = mm.mm_params('OM4')
+w0 = om['w0_um']
+rr = (3 ** 2 - w0 ** 2) / (3 ** 2 + w0 ** 2)
+Pm = mm.mmf_launch(om, 'gauss', w_um=3.0)
+Po = mm.mmf_launch(om, 'gauss', offset_um=5.0)
+th_m = (1 - rr ** 2) * rr ** np.array([0, 2, 4])
+report('MMF launch (mismatch / offset)', np.max(np.abs(Pm[[0, 2, 4]] - th_m)) < 1e-6 and abs(Po[0] / np.exp(-(5 / w0) ** 2) - 1) < 1e-6,
+       f'P_0,2,4 {np.round(Pm[[0, 2, 4]], 4)} vs {np.round(th_m, 4)}, offset P_1 {Po[0]:.4f} vs {np.exp(-(5 / w0) ** 2):.4f}')
+
+# 23) MMF 有效模式带宽：OM3 / OM4 标定值，α_opt 附近带宽最大
+e3 = mm.mmf_emb(mm.mm_params('OM3'), mm.mmf_launch(om, 'ofl'))[0]
+e4 = mm.mmf_emb(om, mm.mmf_launch(om, 'ofl'))[0]
+e0 = mm.mmf_emb(mm.mm_params('OM4', alpha_profile_offset=0.0), mm.mmf_launch(om, 'ofl'))[0]
+report('MMF EMB (OFL)', abs(e3 / 2000 - 1) < 0.02 and abs(e4 / 4700 - 1) < 0.02 and e0 > e4, f'OM3 {e3:.0f}, OM4 {e4:.0f}, α_opt {e0:.0f} MHz·km')

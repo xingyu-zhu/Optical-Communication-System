@@ -3,7 +3,7 @@ function out = imdd_rx(E, cfg, ref, rop_dbm)
 %   用法: res = imdd_rx(imdd_link(ref.E, cfg), cfg, ref, -10)
 %   cfg.eq: 'ffe'（LMS）| 'dfe'（dfe_lms）| 'volterra'（volterra_eq，二/三阶记忆 9/5）| 'mlse'（FFE + pf_mlse）
 %   输出字段: ber, snr（均衡后电 SNR [dB]）, y（均衡输出 1 sps）, n_bits 统计比特数
-E = voa(E, w2dbm(mean(abs(E).^2)) - rop_dbm);
+E = voa(E, w2dbm(sum(sigpow(E))) - rop_dbm);          % 总功率：也适用多模群场 G×N
 pd = struct('R', cfg.R, 'bw', cfg.rx_bw*cfg.rs, 'irnd', cfg.irnd);
 if strcmp(cfg.rx, 'apd'), pd.M = cfg.apd_M; i = apd(E, cfg.fs, pd); else, i = photodiode(E, cfg.fs, pd); end
 y = adc_model(i, cfg.fs, 2*cfg.rs, cfg.adc_enob, []);

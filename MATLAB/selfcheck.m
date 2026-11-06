@@ -149,6 +149,56 @@ rq = addawgn(sq, 3);
 pre = mean(sym2bits(rq, q4) ~= reshape(cw.', 1, [])); post = mean(bh(:, code.free) ~= u, 'all');
 rep('LDPC NMS decoding', post < 1e-4 && pre > 1e-4, sprintf('pre-FEC %.2e -> post-FEC %.1e, NGMI %.3f, rate %.3f', pre, post, calc_ngmi(rq, sq, q4), code.k/1944));
 
+fprintf('---- Hollow-core / few-mode / multimode fiber ----\n');
+% 18) 空芯光纤：SPM 相移 = γPLeff（线性色散模型 + medium=air 时 fR=0 的 RK4 路径）、时延比与 IMI 功率
+hcf = fiber_params('C', 'HCF', 'pmd', 0, 'raman', true);
+Eh = ssfm_manakov(ones(1, 1024), 100e9, hcf, 'nsteps', 50);
+ah = hcf.alpha*log(10)/10; ph_h = hcf.gamma*(1 - exp(-ah*hcf.L))/ah;
+Ei = normpow(randn(1, 2^14) + 1j*randn(1, 2^14));
+eta = mean(abs(fiber_imi(Ei, 64e9, -30, 50e-9) - sqrt(1 - 1e-3)*Ei).^2);
+rep('HCF SPM / latency / IMI', abs(-angle(Eh(1))/ph_h - 1) < 1e-3 && abs(eta/1e-3 - 1) < 0.1, ...
+    sprintf('phi %.2e vs gPLeff %.2e rad, latency %.3f vs SSMF %.3f us/km, IMI %.1f dB (set -30)', -angle(Eh(1)), ph_h, hcf.latency, fib.latency, 10*log10(eta)));
+
+% 19) 多模 Kerr 系数：单模退化为 Manakov 8/9；强耦合 FMF 中 CW 的非线性相移 = Γ·P_tot·L（与随机耦合对易）
+w = 6e-6;
+K1 = kerr_coeffs(mm_overlap([0 0], w), [0 0]); k1 = K1*pi*w^2;
+q = mm_params('FMF3', 'L', 20, 'alpha_db_km', 0, 'mdl_db_km', [0 0], 'mdg_db', [0 0], 'dmgd_ps_km', [0 0], 'D', [0 0], 'S', [0 0]);
+Ec = sqrt(0.05/6)*exp(2j*pi*rand(6, 1))*ones(1, 256);
+Hq = mm_transfer(64e9, 256, q, 1, 3); [~, Gm] = mm_nl_matrix(q);
+dev_nl = max(abs(ssfm_mm(Ec, 64e9, q, RandStream('mt19937ar', 'Seed', 3)) - Hq(:,:,1)*Ec*exp(-1j*Gm*0.05*20e3)), [], 'all')/sqrt(0.05/6);
+rep('Multimode Kerr coefficient', abs(k1 - 8/9) < 1e-6 && dev_nl < 1e-3, sprintf('kappa*Aeff %.6f (8/9), FMF3 CW phase error %.1e', k1, dev_nl));
+
+% 20) 随机模式耦合：无损时 H 酉；mm_link（线性、无 ASE）与 mm_transfer 逐点一致
+q = mm_params('FMF3', 'L', 30);
+Hu = mm_transfer(64e9, 512, mm_params('FMF3', 'L', 30, 'alpha_db_km', 0, 'mdl_db_km', [0 0], 'mdg_db', [0 0]), 1, 1);
+uerr = max(abs(pagemtimes(Hu, 'none', Hu, 'ctranspose') - eye(6)), [], 'all');
+Ex = randn(6, 2048) + 1j*randn(6, 2048);
+E1 = mm_link(Ex, 64e9, q, 2, false, 5, 'nonlinear', false);
+H2 = mm_transfer(64e9, 2048, q, 2, 5);
+E2 = ifft(squeeze(pagemtimes(H2, reshape(fft(Ex, [], 2), 6, 1, []))), [], 2);
+lerr = norm(E1 - E2, 'fro')/norm(E2, 'fro');
+rep('Mode coupling / transfer', uerr < 1e-12 && lerr < 1e-10, sprintf('|HH^H - I| %.1e, link vs transfer %.1e', uerr, lerr));
+
+% 21) 群时延扩展：强耦合 ∝ √L（10 → 40 km 约 2 倍），弱耦合 ≈ 不耦合值 DMGD·L·√(2/9)
+gs = @(reg, L, sd) mean(std(mm_group_delays(mm_transfer(64e9, 4096, mm_params('FMF3', 'L', L, 'regime', reg), 1, sd), 64e9), 1, 2));
+g10 = 0; g40 = 0; gw = 0;
+for sd = 0:5, g10 = g10 + gs('strong', 10, sd)/6; g40 = g40 + gs('strong', 40, sd)/6; gw = gw + gs('weak', 10, sd)/6; end
+r_s = g40/g10; r_w = gw/(50e-12*10*sqrt(2/9));
+rep('GD spread strong / weak', abs(r_s - 2) < 0.3 && abs(r_w - 1) < 0.1, sprintf('strong 40/10 km ratio %.2f (sqrt4 = 2), weak / uncoupled %.3f', r_s, r_w));
+
+% 22) MMF 激励：模场失配高斯光斑 P_N = (1-r²)·r^N（N 偶），横向偏移 d 的匹配光斑 P_1 = e^{-(d/w0)²}
+om = mm_params('OM4'); w0 = om.w0_um;
+rr = (3^2 - w0^2)/(3^2 + w0^2);
+Pm = mmf_launch(om, 'gauss', 3.0); Po = mmf_launch(om, 'gauss', [], 5.0);
+th_m = (1 - rr^2)*rr.^[0 2 4];
+rep('MMF launch (mismatch / offset)', max(abs(Pm([1 3 5]) - th_m)) < 1e-6 && abs(Po(1)/exp(-(5/w0)^2) - 1) < 1e-6, ...
+    sprintf('P_0,2,4 [%.4f %.4f %.4f] vs [%.4f %.4f %.4f], offset P_1 %.4f vs %.4f', Pm([1 3 5]), th_m, Po(1), exp(-(5/w0)^2)));
+
+% 23) MMF 有效模式带宽：OM3 / OM4 标定值，α_opt 附近带宽最大
+e3 = mmf_emb(mm_params('OM3'), mmf_launch(om, 'ofl')); e4 = mmf_emb(om, mmf_launch(om, 'ofl'));
+e0 = mmf_emb(mm_params('OM4', 'alpha_profile_offset', 0), mmf_launch(om, 'ofl'));
+rep('MMF EMB (OFL)', abs(e3/2000 - 1) < 0.02 && abs(e4/4700 - 1) < 0.02 && e0 > e4, sprintf('OM3 %.0f, OM4 %.0f, alpha_opt %.0f MHz km', e3, e4, e0));
+
 function rep(name, ok, info)
 tag = {'BAD', 'OK '};
 fprintf('[%s] %-26s %s\n', tag{ok+1}, name, info);

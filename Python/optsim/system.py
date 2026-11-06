@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 from . import tx, dsp, metrics, devices as dev
 from .params import fiber_params
-from .utils import normalize, resample, set_power
+from .utils import normalize, resample, set_power, total_power
 
 
 @dataclass
@@ -244,7 +244,7 @@ def imdd_rx(E, cfg, ref, rop_dbm, rng=None):
     返回 dict: ber, snr（均衡后电 SNR [dB]）, y（均衡输出 1 sps）, n_bits（统计比特数）
     """
     rng = np.random.default_rng(rng)
-    E = dev.voa(E, 10 * np.log10(np.mean(np.abs(E) ** 2) / 1e-3) - rop_dbm)
+    E = dev.voa(E, 10 * np.log10(total_power(E) / 1e-3) - rop_dbm)     # 总功率：也适用多模群场 (G, N)
     kw = dict(bw=cfg.rx_bw * cfg.rs, irnd=cfg.irnd, rng=rng)
     i = dev.apd(E, cfg.fs, cfg.apd_M, cfg.R, **kw) if cfg.rx == 'apd' else dev.photodiode(E, cfg.fs, cfg.R, **kw)
     y = dev.adc(i, cfg.fs, 2 * cfg.rs, cfg.adc_enob)

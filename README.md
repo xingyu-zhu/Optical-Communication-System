@@ -5,6 +5,7 @@
 - **双版本代码**：Python 与 MATLAB 的模块划分、函数功能和默认参数完全对应，结果可交叉验证，自检的物理量完全一致。
 - **统一参数文件**：波段、光纤、放大器参数集中在 `params/fiber_bands.json`，两种编程语言共用。
 - **完整非线性模型**：SPM / XPM / FWM / SRS / 自陡峭 / PMD / 色散斜率，另附 GN 模型做解析校验。
+- **新型光纤**：空芯光纤（HCF，低时延 / 低非线性 / 模间干扰）、少模光纤（FMF，随机模式耦合 + 多模 Manakov 非线性 + 2M×2M MIMO 相干 SDM 收发）、多模光纤（MMF，850 nm 模式群时延 / EMB / 激励条件 + VCSEL IM-DD）。见 5.5 节。
 - **神经网络均衡器**：MLP / 1D-CNN / BiLSTM（替代 FFE、Volterra）与学习型 DBP（LDBP, 替代 DBP），均与传统方法在独立测试数据上对比。
 - **常用算法库**：除相干 DSP 链外，还有 PB-NLC、DFE / MLSE、OFDM（Schmidl-Cox、LS 信道估计、CPE）、差分 QAM、规则 LDPC（最小和译码）、NGMI。
 - **光纤传感与通感一体**：六种分布式/点式传感技术的前向模型与解调；两种 ISAC 方案（CP-OFDM 背向散射 DAS、相干收发机前向 SOP/相位传感）。见第 8 节。
@@ -85,7 +86,8 @@ Optical Communication System/
 │   │   ├── params.py     读取 JSON，fiber_params(band, fiber) → 光纤参数 dict
 │   │   ├── tx.py         PRBS、QAM/PAM/PSK、判决/解映射、差分 PSK/QAM、LLR、PCS、成帧、RRC 成形、OFDM 调制
 │   │   ├── devices.py    DAC/ADC、激光器、MZM/IQ/DP-IQ、放大器、WSS、WDM 合波、偏振器件、PD/BPD、相干接收机
-│   │   ├── channel.py    色散、Manakov SSFM（SPM/XPM/FWM/SRS/自陡峭/PMD）、多跨链路、GN 模型
+│   │   ├── channel.py    色散、Manakov SSFM（SPM/XPM/FWM/SRS/自陡峭/PMD）、多跨链路、GN 模型、空芯光纤模间干扰 imi
+│   │   ├── multimode.py  少模/多模光纤：耦合段模型、多模 Manakov 非线性系数、MDL/群时延、SDM 收发与 MIMO DSP、MMF 模式群/EMB/激励
 │   │   ├── dsp.py        接收 DSP 算法库（相干链、PB-NLC、FFE/DFE/Volterra/MLSE、OFDM、KK）
 │   │   ├── metrics.py    BER/SER/EVM/SNR/Q/GMI/NGMI/MI、理论 BER、OSNR↔SNR
 │   │   ├── fec.py        规则 LDPC：构造、系统编码、归一化最小和译码
@@ -98,10 +100,11 @@ Optical Communication System/
 │   └── examples/         selfcheck, coherent_dp_qam, wdm_system, band_gn_analysis,
 │                         launch_power_sweep, ber_vs_osnr, imdd_pam4, imdd_system, psk_coherent,
 │                         dpsk_dli, phi_otdr_das, fiber_sensing, isac_ofdm_das, isac_forward_sop,
-│                         nn_imdd_pam4, nn_coherent_nlc
+│                         nn_imdd_pam4, nn_coherent_nlc, hcf_link, fmf_sdm, mmf_vcsel
 └── MATLAB/
     ├── Utils/  Tx/  Components/  Channel/  DSP/  Metrics/  System/  NN/   （一个函数一个文件）
     ├── FEC/  Sensing/  ISAC/      LDPC；光纤传感；通感一体
+    ├── Multimode/                少模/多模光纤（与 Python optsim/multimode.py 一一对应）
     ├── setup_paths.m             添加路径（各主脚本开头已调用）
     └── selfcheck.m, main_*.m     与 Python 示例一一对应
 ```
@@ -142,6 +145,24 @@ SSMF 各波段中心波长处的参数（`band_table('SSMF')`）：
 - MATLAB：`fiber_params('S', 'ULL', 'L', 100, 'pmd', 0, 'raman', true)`
 - 在系统级使用时，`Config(band=..., fiber=..., fib_kw={...})` 或 `sys_config('band', ..., 'fib_kw', {...})` 会自动生成 `cfg.fib`。
 - 要添加新光纤或新波段，在 JSON 里加一项即可。
+
+**空芯光纤 `HCF`**（反谐振 DNANF 型典型值，具体数值随光纤设计变化，待核实）：光在空气中传播，光纤条目使用以下可选字段，`fiber_params` 会自动识别：
+
+| 字段 | 含义 | HCF 取值 |
+|---|---|---|
+| `alpha_db_km` | 绝对衰减（不叠加石英波段衰减） | 0.11 dB/km |
+| `D1550` / `S1550` | 线性色散 D(λ) = D1550 + S1550·(λ − 1550) | 2.5 ps/(nm·km) / 0.007 |
+| `n2`、`aeff_um2` | 含少量玻璃交叠的等效 n2、有效面积 | 3×10⁻²³ m²/W、500 µm² → γ ≈ 2.4×10⁻⁴ /(W·km)（约为 SSMF 的 1/5000） |
+| `ng` | 群折射率（所有光纤都输出 `ng` 与 `latency` [µs/km]，未给出时取 1.468） | 1.0003 → 3.34 µs/km（SSMF 4.90 µs/km，低约 32%） |
+| `medium` | `'air'` 时 fR = 0（空气中无石英拉曼响应） | air |
+
+**少模 / 多模光纤**参数在 JSON 的 `multimode` 部分，用 `mm_params(name)` 读取：
+
+| 名称 | 类型 | 主要参数 |
+|---|---|---|
+| `FMF3` | 3 模 FMF（LP01 + LP11a/b，6 个空间-偏振通道） | 基模模场半径 6 µm，DMGD 50 ps/km，MDL 0.01 dB/km，强耦合（lc = 1 km） |
+| `FMF6` | 6 模 FMF（3 个模式群，12 个通道） | 模场半径 7 µm，DMGD 0 / 60 / 120 ps/km，弱耦合（群间 −30 dB/km） |
+| `OM3` / `OM4` | 50 µm 渐变折射率 MMF，850 nm | NA 0.2，V ≈ 37，18 个模式群；剖面指数偏差按满注入 EMB 2000 / 4700 MHz·km 标定 |
 
 ---
 
@@ -267,6 +288,33 @@ SSMF 各波段中心波长处的参数（`band_table('SSMF')`）：
 - **代价**：相对相干检测，DBPSK、DQPSK、D8PSK 在 HD-FEC 处分别多需 1.4、2.4、2.9 dB OSNR；DQPSK、D8PSK 仿真与差分检测理论吻合到 0.2 dB 以内。
 - **DBPSK 偏差**：仿真比理论差约 0.9 dB。原因是偏振不敏感的 DLI 还收到正交偏振的 ASE-ASE 拍频，而理论只计同偏振噪声。已验证：只保留同偏振 ASE 时，仿真与理论完全重合。
 - **相位噪声容限**：BER 在 Δν·T ≈ 10⁻³ 以下基本不受影响，超过后 D8PSK 最先劣化。
+
+### 5.5 空芯、少模与多模光纤
+
+**空芯光纤（HCF）**：直接作为新光纤类型进入现有链路（`Config(fiber='HCF')` / `sys_config('fiber', 'HCF')`），SSFM、GN 模型、DBP 都不用改。与 SSMF 的主要区别：
+- 非线性系数低约 3.7 个数量级 → 最优入纤功率高 20 dB 以上（实际受放大器输出功率限制）；
+- 色散约 2.5 ps/(nm·km)，色散补偿负担小；
+- 群折射率 ≈ 1 → 时延比石英光纤低约 32%；
+- 特有损伤**模间干扰（IMI）**：基模分布式耦合到高阶模、以不同群速度传播后再耦合回来，形成一串弱的随机相位延迟回波（`channel.imi` / `fiber_imi`）。回波时延远大于均衡器窗口时 IMI 表现为加性干扰，1/SNR ≈ 1/SNR₀ + N·η。
+
+**少模光纤（FMF）——耦合段模型**（`multimode.ssfm_mm` / `mm_link`，MATLAB `Multimode/`）。光场为 2M×N（M 个空间模式 × 2 偏振）。光纤按耦合长度 lc 分段：
+- 段内各通道独立传播：模式群各自的衰减（MDL）、群时延（DMGD，去均值）、色散 D/S；
+- 段间乘随机酉矩阵：`strong` 为全部 2M 通道 Haar 随机强耦合；`weak` 只在简并模式群内强耦合、群间按 `xt_db_km` 弱耦合；
+- 非线性取模式群平均的**多模 Manakov 方程** ∂E_g/∂z = −j·Σ_h Γ_gh |E_h|² E_g（Mecozzi 2012；Mumtaz 2013）。系数 Γ = (n2ω0/c)·κ，κ 由 Kerr 张量对群内 Haar 随机酉变换求平均得到：用复高斯矩缩并，κ_gg = Σ_{i,j∈g} S_ij/(n_g(n_g+1))，κ_gh = Σ S_ij/(n_g n_h)，S_ij = f_ab·(2/3 + 4/3·δ_pq)，f_ab = ∬ψa²ψb² dA 为模场交叠积分（抛物线剖面 Hermite-Gauss 模）。单模时 κ = 8/9·f，即标准 Manakov 系数（selfcheck 验证到 10⁻⁶）；
+- 少模 EDFA：补偿平均跨段损耗，叠加模式相关增益 MDG 与各通道 ASE。
+
+`mm_transfer` 给出与同一种子的 `mm_link` 逐点一致的线性传递矩阵 H(f)，由此计算 MDL（奇异值比 `mdl_db`）和群时延（群时延算符 j·H⁻¹·dH/dω 的本征值 `group_delays`）。强耦合时群时延扩展 ∝ √L，弱耦合时 ∝ L（Ho & Kahn 2011）。
+
+**SDM 收发**：`sdm_tx`（M 个 DP-QAM 发射机共用一个激光器）→ `mm_link` → `sdm_rx`（M 个相干接收机共用本振）→ `sdm_rx_dsp`：
+- 模式混合与群时延扩展未补偿时，4 次方频偏估计失效（实测频偏为 0 时也估出 1.1 GHz），因此 MIMO 之前用**训练序列辅助粗频偏估计**（`foe_training`）：所有通道频偏相同，y_i(t)·s_j*(t−k) 的频谱在 Δf 处有峰，对全部 (i, j, k) 非相干累加；
+- 2M×2M MIMO：训练序列 DA-LMS 预收敛，再以其抽头为初值全帧 RDE；步长按 LMS 稳定条件 μ ∝ 1/(P·ntaps) 归一化（固定 1e‑3 在 12×12、161 抽头时发散）；
+- 抽头数须覆盖群时延扩展，经验上 ntaps ≈ 4×扩展符号数 + 1；12×12 MIMO 需要更长的训练序列（示例用 8192）。
+
+**多模光纤（MMF，850 nm）**：α 剖面渐变折射率光纤，G = floor(V/2) 个主模式群，第 g 群含 g 个空间模式：
+- 群时延用 Gloge-Marcatili / Olshansky-Keck 公式（忽略剖面色散 ε）：τ_g = L·ng/c·[1 + Δ(α−2)/(α+2)·x^{2α/(α+2)} + Δ²(3α−2)/(2(α+2))·x^{4α/(α+2)}]，x ≈ g²/(G(G+1))；最优剖面 α_opt ≈ 2 − 12Δ/5；
+- 激励条件 `mmf_launch`：满注入（各模式等功率）或高斯光斑对 HG 模的交叠积分（模场失配时只激发偶数阶群，P_N = (1−r²)·r^N；横向偏移时为泊松分布，均与解析式一致到 10⁻⁶）；
+- 全面积探测器上各模式正交，探测功率 = Σ_g |E_g|²，所以 `mmf_link` 输出 G×N 群场，可直接送入 `imdd_rx`；
+- `mmf_emb` 由模式群冲激响应计算 EMB。离散冲激响应在 −3 dB 带宽之外有深陷波，比实际光纤（DMD 连续、含模式耦合）更悲观；未建模模式噪声、模式分配噪声和多横模 VCSEL 的光谱宽度（VCSEL 用 `dml` 近似）。
 
 ---
 
@@ -482,6 +530,13 @@ Python 函数位于 `optsim.<模块>`，MATLAB 为同名或近名函数文件。
 | DFE / MLSE | `dsp.dfe(x, ref, nf, nb, mu, sps, n_train, levels)`, `dsp.ch_est(x, ref, ntaps)`, `dsp.mlse(x, h, levels)` | `dfe_lms`, `ch_est`, `mlse_viterbi` |
 | LDPC | `fec.ldpc_make(n, dv, dc)`, `fec.ldpc_encode(u, code)`, `fec.ldpc_decode(llr, code)` | `ldpc_make`, `ldpc_encode`, `ldpc_decode` |
 | 文件编解码 | `filecodec.file_tx_signal(path, cfg, fec_kind)`, `filecodec.decode_file(y, ref, out_dir)`, `pack_file`, `unpack_file` | —（仅 Python） |
+| 空芯光纤 | `fiber_params('C', 'HCF')`, `fib['latency']`, `channel.imi(E, fs, imi_db, tau_max)` | `fiber_params('C', 'HCF')`, `fib.latency`, `fiber_imi` |
+| 少模/多模参数 | `multimode.mm_params(name, L=, **kw)` | `mm_params(name, 'L', ..)` |
+| 模场 / 非线性系数 | `multimode.hg1d`, `overlap(hg, w)`, `kerr_coeffs(f, labels)`, `nl_matrix(mmf)` | `hg1d`, `mm_overlap`, `kerr_coeffs`, `mm_nl_matrix` |
+| FMF 传输 | `multimode.ssfm_mm(E, fs, mmf, rng=)`, `mm_link(E, fs, mmf, n_spans, rng=, noise_rng=)`, `coupling`, `haar_unitary` | `ssfm_mm(E, fs, mmf, stream)`, `mm_link(E, fs, mmf, n_spans, ase, seed)`, `mm_coupling`, `haar_unitary` |
+| 传递矩阵 / MDL / 群时延 | `multimode.mm_transfer(fs, n, mmf, n_spans, rng)`, `mdl_db(H)`, `group_delays(H, fs)` | `mm_transfer`（2M×2M×n）, `mm_mdl`, `mm_group_delays` |
+| SDM 收发 | `multimode.sdm_tx(cfg, M)`, `sdm_rx(E, cfg)`, `foe_training`, `sdm_rx_dsp(r, cfg, refs, mmf, n_spans, ntaps)` | `sdm_tx`, `sdm_rx`, `foe_training`, `sdm_rx_dsp` |
+| MMF | `multimode.mmf_groups(mmf)`, `mmf_launch(mmf, kind, w_um, offset_um)`, `mmf_link(E, fs, mmf, P, L)`, `mmf_emb(mmf, P)` | `mmf_groups`, `mmf_launch`, `mmf_link`, `mmf_emb` |
 | NGMI | `metrics.ngmi(rx, tx, const)` | `calc_ngmi` |
 | 瑞利传感 | `sensing.cell_len`, `rayleigh_fiber`, `backscatter`, `lfm`, `pulse_compress`, `ddc`, `das_phase`, `vib_locate`, `otdr_trace`, `otdr_events`, `ofdr_scan`, `ofdr_shift` | 同名（`lfm` → `lfm_pulse`；常数见 `sens_const`） |
 | 布里渊 / 拉曼 / FBG | `sensing.bfs`, `brillouin_gain`, `botda`, `bfs_fit`, `raman_ratio`, `dts_temp`, `fbg_reflect`, `fbg_shift`, `fbg_peak` | `bfs_shift`, `brillouin_gain`, `botda_bgs`, `bfs_fit`, 其余同名 |
@@ -495,7 +550,7 @@ Python 函数位于 `optsim.<模块>`，MATLAB 为同名或近名函数文件。
 
 | 脚本（Python / MATLAB） | 内容 | 参考结果 |
 |---|---|---|
-| `selfcheck` | 8 项 DSP 恢复 + 5 项光纤物理 + 5 项扩展算法（OFDM/Schmidl-Cox、差分 QAM 抗周跳、PAM4 FFE/DFE/MLSE、PB-NLC、LDPC） | 18/18 OK |
+| `selfcheck` | 8 项 DSP 恢复 + 5 项光纤物理 + 5 项扩展算法（OFDM/Schmidl-Cox、差分 QAM 抗周跳、PAM4 FFE/DFE/MLSE、PB-NLC、LDPC）+ 6 项空芯/少模/多模光纤（HCF SPM/时延/IMI、多模 Kerr 系数、模式耦合酉性与传递矩阵、群时延 √L / L 规律、MMF 激励解析式、EMB 标定） | 24/24 OK |
 | `coherent_dp_qam` / `main_coherent_dp_qam` | 40 GBd DP-16QAM，单信道，10×80 km C-SSMF，含 DAC/ADC/激光/IQ/PMD/PDL/WSS 全部损伤 | SNR ≈ 19.0 dB，BER ≈ 3–5e‑5，GMI ≈ 4.0 |
 | `wdm_system` / `main_wdm_system` | 7×32 GBd，50 GHz 间隔，10×80 km，理想收发机；对比 ASE-only / 单信道 / WDM / WDM+SRS | 见下表 |
 | `band_gn_analysis` / `main_band_gn_analysis` | O–U 各波段 × SSMF/ULL/NZDSF，满载 GN 最优 SNR | C-SSMF 19.1 dB；C-ULL 23.1 dB；O-SSMF 4.2 dB |
@@ -511,6 +566,24 @@ Python 函数位于 `optsim.<模块>`，MATLAB 为同名或近名函数文件。
 | `isac_forward_sop` / `main_isac_forward_sop` | 相干收发机前向 SOP / 相位传感 | 扰动频率 60 / 120 Hz 正确识别；通信 BER 2.9e‑4 |
 | `nn_imdd_pam4` / `main_nn_imdd_pam4` | PAM4 IM-DD：FFE / Volterra / MLP / CNN / BiLSTM | 见第 7.3 节；NN 比 Volterra 低 1–2 个数量级 BER |
 | `nn_coherent_nlc` / `main_nn_coherent_nlc` | 相干长距：CDC / DBP / LDBP / 黑盒 CNN | 见第 7.3 节；LDBP 4 步/跨约 25.6 dB，乘法量约为全 DBP 的一半 |
+| `hcf_link` / `main_hcf_link` | 空芯光纤 vs SSMF：参数与时延、单信道 10×80 km 功率扫描（SSFM vs GN）、IMI 容限 | 见下表 |
+| `fmf_sdm` / `main_fmf_sdm` | FMF3/FMF6：群时延扩展与 MDL 随长度、多模非线性系数、FMF3 强耦合 4×50 km 6×6 MIMO 功率扫描、FMF6 弱耦合 10 km 12×12 MIMO | 见下表；约 4 分钟 |
+| `mmf_vcsel` / `main_mmf_vcsel` | OM3/OM4 850 nm：模式群时延、EMB 随剖面偏差、激励条件、53.125 GBd PAM4 BER 随长度 | 见下表 |
+
+**空芯 / 少模 / 多模光纤结果**（Python / MATLAB；两边随机数实现不同，统计结果一致，确定性物理量逐位一致）：
+
+| 场景 | 结果 | 解读 |
+|---|---|---|
+| HCF vs SSMF 参数（C 波段，10×80 km） | γ 2.4×10⁻⁴ vs 1.32 /(W·km)；时延 3.34 vs 4.90 µs/km（800 km：2.67 vs 3.92 ms）；GN 最优功率 +20.9 vs +0.7 dBm，最优 SNR 48.8 vs 20.9 dB | 低非线性把最优功率推高约 20 dB；低损耗与低色散使 ASE 极限 SNR 也更高 |
+| SSFM + CDC 功率扫描 | SSMF 峰值 20.6 / 20.6 dB @ 0 dBm（GN 20.9 dB）；HCF 峰值 36.1 / 35.4 dB @ +20 dBm，+32 dBm 时 27.6 / 27.7 dB | HCF 高功率时约 36 dB 封顶，来自接收 DSP 自身的 SNR 上限（自适应均衡失调、BPS 窗口噪声），不是光纤效应；+32 dBm 时 SSFM 比 GN 低约 2–3 dB，推测与 HCF 低色散下 GN 的高斯假设偏差有关（未单独验证） |
+| HCF IMI 容限（+10 dBm，每跨一次） | −50 → −30 dB/跨：SNR 33.5 → 19.8 dB，与 1/SNR₀ + N·η 相差 ≤ 0.05 dB；−20 dB/跨时仿真低于理论约 1 dB | 回波时延（10 ps/m × 80 km）远大于均衡器窗口，IMI 等效为加性干扰；强 IMI 时还影响自适应均衡与 CPR |
+| 多模非线性系数 Γ | FMF3 强耦合 0.592；弱耦合 [[0.828, 0.621], [0.621, 0.497]]；FMF6 强耦合 0.328 /(W·km) | 模式越多、模场越大，平均非线性越弱；单模退化为 8/9·γ |
+| FMF3 群时延标准差（5 → 200 km） | 强耦合 53 → 333 ps（Python）/ 59 → 332 ps（MATLAB），增大 6.2 倍（√40 = 6.3）；弱耦合 118 → 4371 ps ∝ L，50 km 时 1157 ps（不耦合上限 1179 ps） | 强耦合把群时延扩展从 ∝ L 降为 ∝ √L，MIMO 抽头数随之大幅减少 |
+| FMF3 MDL（5 → 200 km） | 强耦合 0.32 → 0.42 dB；弱耦合 0.25 → 1.66 dB | 强耦合使 MDL 在模式间平均，累积更慢；弱耦合在短距离先降后升，因为少模 EDFA 给 LP11 多 0.3 dB 增益（MDG），与 LP11 多出的 0.01 dB/km 损耗在约 30 km 处抵消 |
+| FMF3 强耦合 4×50 km，6×6 MIMO（121 抽头） | 每模式 −4 / 0 / 4 / 8 / 12 dBm：平均 SNR 19.9 / 20.5 / 20.3 / 17.6 / 10.5 dB（Python），MATLAB 18.0–21.3 dB 区间同趋势 | 低功率端被 6-bit DAC/ADC 等收发机损伤限制在约 21 dB；+8 dBm 起多模非线性代价明显。MATLAB 该次实现中 LP01 比其他模式低约 2.5 dB，来自随机 MDL/MDG 分配 |
+| FMF6 弱耦合 1×10 km，12×12 MIMO（157 抽头，训练 8192） | 各模式 SNR 24.2–26.2 dB（Python）/ 25.8–27.4 dB（MATLAB），BER ≈ 1e‑4 | 误码集中在帧末尾十几个符号：最后一个导频之后的一次周跳，属帧边界效应 |
+| OM3 / OM4 EMB（满注入） | 2000 / 4700 MHz·km（标定）；α_opt 时 10770 MHz·km；居中高斯光斑（w = 4 µm）> 10⁶，偏移 8 µm 时 1.27×10⁵ MHz·km | 受限激励只激发低阶模式群，有效带宽远高于满注入 |
+| 53.125 GBd PAM4，ROP −4 dBm，满注入 | 低于 KP4 门限的最大长度：OM3 约 60 m，OM4 约 150 m（两种语言一致）；只有色度色散时 300 m 仍无明显代价 | 850 nm 短距链路主要受模式带宽限制；离散模式群模型比实际光纤更悲观，结果只说明趋势 |
 
 **WDM 结果**（中心信道，每信道 1 dBm，ideal TRx）：
 
@@ -634,4 +707,12 @@ print(out['crc_ok'], out['ber_pre'], out['n_fail'])                   # CRC 是�
 - B. Karanov et al., “End-to-end deep learning of optical fiber communications,” JLT 36(20), 2018
 - N. Stojanovic et al., “Volterra and Wiener equalizers for short-reach 100G PAM-4 applications,” JLT 35(21), 2017
 - T. A. Eriksson et al., “Applying neural networks in optical communication systems: possible pitfalls,” PTL 29(23), 2017（训练/测试数据陷阱）
+- F. Poletti, “Nested antiresonant nodeless hollow core fiber,” Opt. Express 22(20), 23807–23828, 2014（反谐振空芯光纤）
+- G. T. Jasion et al., “0.174 dB/km hollow core double nested antiresonant nodeless fiber (DNANF),” OFC 2022, Th4C.7（待核实）；M. Petrovich et al., “Broadband optical fibre with an attenuation lower than 0.1 decibel per kilometre,” Nat. Photonics, 2025（待核实卷期）
+- A. Mecozzi, C. Antonelli, M. Shtaif, “Nonlinear propagation in multi-mode fibers in the strong coupling regime,” Opt. Express 20(11), 11673–11678, 2012
+- S. Mumtaz, R.-J. Essiambre, G. P. Agrawal, “Nonlinear propagation in multimode and multicore fibers: generalization of the Manakov equations,” JLT 31(3), 398–406, 2013
+- K.-P. Ho, J. M. Kahn, “Statistics of group delays in multimode fiber with strong mode coupling,” JLT 29(21), 3119–3128, 2011
+- R. Ryf et al., “Mode-division multiplexing over 96 km of few-mode fiber using coherent 6×6 MIMO processing,” JLT 30(4), 521–531, 2012
+- D. Gloge, E. A. J. Marcatili, “Multimode theory of graded-core fibers,” Bell Syst. Tech. J. 52(9), 1563–1578, 1973
+- R. Olshansky, D. B. Keck, “Pulse broadening in graded-index optical fibers,” Appl. Opt. 15(2), 483–491, 1976（α 剖面群时延与 α_opt）
 - 开源参考：OptiCommPy（Python）、Robochameleon（MATLAB）
